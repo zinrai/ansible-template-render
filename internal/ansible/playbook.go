@@ -7,6 +7,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Represents a role in a playbook
+type PlaybookRole struct {
+	Name string
+}
+
+// Represents a play in a playbook
+type PlaybookPlay struct {
+	Roles []PlaybookRole
+}
+
+// Represents an Ansible playbook
+type Playbook struct {
+	Plays []map[string]interface{}
+}
+
 // Loads an Ansible playbook file
 func LoadPlaybook(path string) ([]map[string]interface{}, error) {
 	data, err := os.ReadFile(path)
@@ -25,6 +40,15 @@ func LoadPlaybook(path string) ([]map[string]interface{}, error) {
 
 // Extracts roles used in a playbook
 func ExtractRolesFromPlaybook(playbook []map[string]interface{}) []string {
+	extractor := PlaybookRoleExtractor{}
+	return extractor.Extract(playbook)
+}
+
+// Extracts roles from a playbook
+type PlaybookRoleExtractor struct{}
+
+// Extracts roles from a playbook
+func (e *PlaybookRoleExtractor) Extract(playbook []map[string]interface{}) []string {
 	roleMap := make(map[string]bool) // Track roles to prevent duplicates
 	var roles []string
 
@@ -35,7 +59,7 @@ func ExtractRolesFromPlaybook(playbook []map[string]interface{}) []string {
 		}
 
 		for _, role := range rolesList {
-			roleName := extractRoleName(role)
+			roleName := e.extractRoleName(role)
 			if roleName == "" {
 				continue
 			}
@@ -52,8 +76,8 @@ func ExtractRolesFromPlaybook(playbook []map[string]interface{}) []string {
 	return roles
 }
 
-// Extracts role name from different role specifications
-func extractRoleName(role interface{}) string {
+// Role name from different role specifications
+func (e *PlaybookRoleExtractor) extractRoleName(role interface{}) string {
 	// Direct string role name
 	if roleName, ok := role.(string); ok {
 		return roleName

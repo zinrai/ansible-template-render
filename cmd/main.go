@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 
 	"github.com/zinrai/ansible-template-render/internal/config"
@@ -71,19 +70,17 @@ func main() {
 
 // Configures the logger based on the specified level
 func setupLogging(level string) {
-	var logLevel slog.Level
+	logLevel := logger.InfoLevel
 
 	switch level {
 	case "debug":
-		logLevel = slog.LevelDebug
-	case "info":
-		logLevel = slog.LevelInfo
+		logLevel = logger.DebugLevel
 	case "warn":
-		logLevel = slog.LevelWarn
+		logLevel = logger.WarnLevel
 	case "error":
-		logLevel = slog.LevelError
-	default:
-		logLevel = slog.LevelInfo
+		logLevel = logger.ErrorLevel
+	case "info":
+		logLevel = logger.InfoLevel
 	}
 
 	logger.Initialize(logLevel, nil)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/zinrai/ansible-template-render/internal/logger"
 )
@@ -15,21 +16,32 @@ func RunAnsible(playbookPath, outputDir string) error {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
-	// Build the command line
-	cmd := exec.Command(
-		"ansible-playbook",
+	// Define command arguments
+	templatePrefix := fmt.Sprintf("template_dest_prefix=%s", outputDir)
+	args := []string{
 		playbookPath,
 		"--tags", "render_config",
-		"-e", fmt.Sprintf("template_dest_prefix=%s", outputDir),
-	)
+		"-e", templatePrefix,
+	}
+
+	// Build the command
+	cmd := exec.Command("ansible-playbook", args...)
 
 	// Use standard output and error
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	logger.Info("Executing Ansible command",
-		"command", fmt.Sprintf("ansible-playbook %s --tags render_config -e \"template_dest_prefix=%s\"",
-			playbookPath, outputDir))
+	// Build the command string for logging
+	// Escape the template_dest_prefix value for proper logging
+	loggedTemplatePrefix := fmt.Sprintf("\"template_dest_prefix=%s\"", outputDir)
+	logArgs := []string{
+		playbookPath,
+		"--tags", "render_config",
+		"-e", loggedTemplatePrefix,
+	}
+	cmdString := "ansible-playbook " + strings.Join(logArgs, " ")
+
+	logger.Info("Executing Ansible command", "command", cmdString)
 
 	return cmd.Run()
 }

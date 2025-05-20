@@ -11,6 +11,42 @@ import (
 	"github.com/zinrai/ansible-template-render/internal/utils"
 )
 
+// Represents a directory creation task
+type DirectoryTask struct {
+	DestPath string
+}
+
+// Creates a new directory task
+func NewDirectoryTask(destPath string) *DirectoryTask {
+	return &DirectoryTask{
+		DestPath: destPath,
+	}
+}
+
+// Converts the directory task to a map representation
+func (d *DirectoryTask) ToMap() map[string]interface{} {
+	dirPath := filepath.Dir(d.DestPath)
+
+	return map[string]interface{}{
+		"name": fmt.Sprintf("Ensure directory exists for %s", d.DestPath),
+		"file": map[string]interface{}{
+			"path":  fmt.Sprintf("{{ template_dest_prefix | default('') }}%s", dirPath),
+			"state": "directory",
+			"mode":  "0755",
+		},
+		"delegate_to": "localhost",
+		"run_once":    true,
+		"tags":        []interface{}{"render_config"},
+	}
+}
+
+// Represents the result of processing tasks
+type ProcessResult struct {
+	Tasks        []map[string]interface{}
+	Modified     bool
+	HasTemplates bool
+}
+
 // Processes the tasks of a role
 func ProcessRoleTasks(roleName, tempDir string) (bool, error) {
 	// Find the role's task files
@@ -52,16 +88,16 @@ func processTaskFile(taskFile, tempDir string) (bool, error) {
 		return false, fmt.Errorf("loading task file %s: %w", taskFile, err)
 	}
 
-	// Check template tasks and insert directory creation tasks
-	tasks, modified, hasTemplates := processTemplateTasks(tasks, taskFile)
+	// Process the tasks
+	result := processTemplateTasks(tasks, taskFile)
 
 	// No modifications needed, just copy the file
-	if !modified {
+	if !result.Modified {
 		err := utils.CopyFile(taskFile, tempTaskFile)
 		if err != nil {
 			return false, fmt.Errorf("copying task file: %w", err)
 		}
-		return hasTemplates, nil
+		return result.HasTemplates, nil
 	}
 
 	// Save the modified tasks
@@ -70,15 +106,15 @@ func processTaskFile(taskFile, tempDir string) (bool, error) {
 		return false, fmt.Errorf("creating temp task directory: %w", err)
 	}
 
-	if err := ansible.SaveTaskFile(tasks, tempTaskFile); err != nil {
+	if err := ansible.SaveTaskFile(result.Tasks, tempTaskFile); err != nil {
 		return false, fmt.Errorf("saving modified task file: %w", err)
 	}
 
-	return hasTemplates, nil
+	return result.HasTemplates, nil
 }
 
 // Processes template tasks, inserting directory creation tasks and modifying templates
-func processTemplateTasks(tasks []map[string]interface{}, taskFile string) ([]map[string]interface{}, bool, bool) {
+func processTemplateTasks(tasks []map[string]interface{}, taskFile string) ProcessResult {
 	var result []map[string]interface{}
 	modified := false
 	hasTemplates := false
@@ -86,15 +122,18 @@ func processTemplateTasks(tasks []map[string]interface{}, taskFile string) ([]ma
 
 	for _, task := range tasks {
 		if ansible.IsTemplateTask(task) {
-			// Extract destination path
-			destPath := getTemplateDestPath(task)
+			// Convert to TemplateTask object
+			templateTask, _ := ansible.NewTemplateTask(task)
+
+			// Get destination path
+			destPath := templateTask.GetDestPath()
 
 			if destPath != "" {
 				// Create directory task for this template
 				dirPath := filepath.Dir(destPath)
 				if !processedDirs[dirPath] {
-					dirTask := createDirectoryTask(destPath)
-					result = append(result, dirTask)
+					dirTask := NewDirectoryTask(destPath)
+					result = append(result, dirTask.ToMap())
 					processedDirs[dirPath] = true
 					modified = true
 				}
@@ -121,69 +160,19 @@ func processTemplateTasks(tasks []map[string]interface{}, taskFile string) ([]ma
 		}
 	}
 
-	return result, modified, hasTemplates
-}
-
-// Creates a directory creation task for a template destination
-func createDirectoryTask(destPath string) map[string]interface{} {
-	dirPath := filepath.Dir(destPath)
-
-	return map[string]interface{}{
-		"name": fmt.Sprintf("Ensure directory exists for %s", destPath),
-		"file": map[string]interface{}{
-			"path":  fmt.Sprintf("{{ template_dest_prefix | default('') }}%s", dirPath),
-			"state": "directory",
-			"mode":  "0755",
-		},
-		"delegate_to": "localhost",
-		"run_once":    true,
-		"tags":        []interface{}{"render_config"},
+	return ProcessResult{
+		Tasks:        result,
+		Modified:     modified,
+		HasTemplates: hasTemplates,
 	}
 }
 
 // Gets the destination path from a template task
 func getTemplateDestPath(task map[string]interface{}) string {
-	if template, ok := task["template"].(map[string]interface{}); ok {
-		if dest, ok := template["dest"].(string); ok {
-			return dest
-		}
+	templateTask, isTemplate := ansible.NewTemplateTask(task)
+	if !isTemplate {
+		return ""
 	}
 
-	if template, ok := task["ansible.builtin.template"].(map[string]interface{}); ok {
-		if dest, ok := template["dest"].(string); ok {
-			return dest
-		}
-	}
-
-	return ""
-}
-
-// Modifies template tasks and reports if modifications were made
-func modifyTemplateTasks(tasks []map[string]interface{}, taskFile string) (bool, bool) {
-	modified := false
-	hasTemplates := false
-
-	for i, task := range tasks {
-		if !ansible.IsTemplateTask(task) {
-			continue
-		}
-
-		// Deep copy the task
-		taskCopy, err := utils.DeepCopy(task)
-		if err != nil {
-			logger.Warn("Error copying task", "error", err)
-			continue
-		}
-
-		// Modify the copied task
-		ansible.ModifyTemplateTask(taskCopy.(map[string]interface{}))
-		tasks[i] = taskCopy.(map[string]interface{})
-
-		modified = true
-		hasTemplates = true
-
-		logger.Info("Modified template task", "file", taskFile)
-	}
-
-	return modified, hasTemplates
+	return templateTask.GetDestPath()
 }

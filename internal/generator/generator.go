@@ -38,12 +38,12 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 	// Find the playbook file
 	playbookPath, err := finder.FindPlaybook(playbookConfig.Name)
 	if err != nil {
-		return utils.NewError(utils.ErrFileNotFound, "finding playbook", err)
+		return utils.NewFileNotFoundError(playbookConfig.Name, err)
 	}
 	logger.Info("Found playbook", "path", playbookPath)
 
-	// Create the environment for processing
-	env, err := setupEnvironment(playbookConfig.Name, cfg.Options)
+	// Create and setup the environment
+	env, err := setupAndValidateEnvironment(playbookConfig.Name, cfg.Options)
 	if err != nil {
 		return err
 	}
@@ -53,8 +53,8 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 		defer cleanupEnvironment(env)
 	}
 
-	// Process the playbook
-	hasTemplates, err := processPlaybookContent(playbookPath, env)
+	// Process roles and templates
+	hasTemplates, err := processPlaybookRolesAndTemplates(playbookPath, env)
 	if err != nil {
 		return err
 	}
@@ -64,13 +64,40 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 		return nil
 	}
 
+	// Execute or generate instructions
+	return executeOrGenerateInstructions(playbookConfig, cfg, env, hasTemplates)
+}
+
+// Setup and validate the environment
+func setupAndValidateEnvironment(playbookName string, opts config.Options) (*Environment, error) {
+	env, err := setupEnvironment(playbookName, opts)
+	if err != nil {
+		return nil, utils.NewError(utils.ErrEnvironmentSetup, "setting up environment", err)
+	}
+
+	return env, nil
+}
+
+// Process playbook roles and templates
+func processPlaybookRolesAndTemplates(playbookPath string, env *Environment) (bool, error) {
+	// Process roles and templates
+	hasTemplates, err := processPlaybookContent(playbookPath, env)
+	if err != nil {
+		return false, err
+	}
+
+	return hasTemplates, nil
+}
+
+// Execute or generate instructions
+func executeOrGenerateInstructions(playbookConfig config.PlaybookConfig, cfg *config.Config, env *Environment, hasTemplates bool) error {
 	// Determine output directory
 	outputDir := determineOutputDirectory(cfg.OutputBaseDir, playbookConfig.Name, env.TempDir)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return utils.NewError(utils.ErrUnknown, "creating output directory", err)
 	}
 
-	// If generate-only mode, just print instructions and exit
+	// Generate-only mode: display instructions and exit
 	if cfg.Options.GenerateOnly {
 		printGenerateOnlyInstructions(env, outputDir)
 		return nil
@@ -90,17 +117,6 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 	}
 
 	return nil
-}
-
-// Determines the output directory for a playbook
-func determineOutputDirectory(configOutputDir, playbookName, tempDir string) string {
-	// If output directory is explicitly specified in config, use it
-	if configOutputDir != "" {
-		return filepath.Join(configOutputDir, playbookName)
-	}
-
-	// Otherwise, use tmp-{playbookName}/output
-	return filepath.Join(tempDir, "output")
 }
 
 // Holds the processing environment details
@@ -123,16 +139,10 @@ func setupEnvironment(playbookName string, opts config.Options) (*Environment, e
 		return nil, utils.NewError(utils.ErrUnknown, "creating temp directory", err)
 	}
 
-	// Create the roles directory
-	rolesDir := filepath.Join(tempDir, "roles")
-	if err := os.MkdirAll(rolesDir, 0755); err != nil {
-		return nil, utils.NewError(utils.ErrUnknown, "creating roles directory", err)
-	}
-
-	// Create the output directory
-	outputDir := filepath.Join(tempDir, "output")
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return nil, utils.NewError(utils.ErrUnknown, "creating output directory", err)
+	// Create the subdirectories
+	err := createRequiredDirectories(tempDir)
+	if err != nil {
+		return nil, err
 	}
 
 	// Save the current directory
@@ -145,6 +155,23 @@ func setupEnvironment(playbookName string, opts config.Options) (*Environment, e
 		TempDir:     tempDir,
 		OriginalDir: currentDir,
 	}, nil
+}
+
+// Create required directories
+func createRequiredDirectories(tempDir string) error {
+	// Create the roles directory
+	rolesDir := filepath.Join(tempDir, "roles")
+	if err := os.MkdirAll(rolesDir, 0755); err != nil {
+		return utils.NewError(utils.ErrUnknown, "creating roles directory", err)
+	}
+
+	// Create the output directory
+	outputDir := filepath.Join(tempDir, "output")
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return utils.NewError(utils.ErrUnknown, "creating output directory", err)
+	}
+
+	return nil
 }
 
 // Cleans up the processing environment
@@ -166,6 +193,22 @@ func processPlaybookContent(playbookPath string, env *Environment) (bool, error)
 		return false, utils.NewError(utils.ErrUnknown, "loading playbook", err)
 	}
 
+	// Extract and process roles
+	hasTemplates, err := extractAndProcessRoles(playbook, env)
+	if err != nil {
+		return false, err
+	}
+
+	// Copy the playbook and create config
+	if err := preparePlaybookFiles(playbookPath, env); err != nil {
+		return false, err
+	}
+
+	return hasTemplates, nil
+}
+
+// Extract and process roles from the playbook
+func extractAndProcessRoles(playbook []map[string]interface{}, env *Environment) (bool, error) {
 	// Extract roles from the playbook
 	directRoles := ansible.ExtractRolesFromPlaybook(playbook)
 	logger.Info("Found direct roles", "roles", directRoles)
@@ -176,23 +219,49 @@ func processPlaybookContent(playbookPath string, env *Environment) (bool, error)
 		return false, err
 	}
 
+	return hasTemplates, nil
+}
+
+// Prepare playbook files (copy and create config)
+func preparePlaybookFiles(playbookPath string, env *Environment) error {
 	// Copy the playbook file to the temporary directory
 	if err := copyPlaybookToTemp(playbookPath, env); err != nil {
-		return false, err
+		return err
 	}
 
 	// Create Ansible configuration
 	if err := createAnsibleConfig(env); err != nil {
-		return false, err
+		return err
 	}
 
-	return hasTemplates, nil
+	return nil
 }
 
 // Resolves role dependencies and processes all roles
 func resolveAndProcessRoles(directRoles []string, env *Environment) ([]string, bool, error) {
 	// Resolve role dependencies
 	resolvedRoles := make(map[string]bool)
+	allRoles, err := gatherAllRoles(directRoles, resolvedRoles)
+	if err != nil {
+		// Error already logged in gatherAllRoles
+		return nil, false, nil
+	}
+
+	// Remove duplicates
+	uniqueRoles := removeDuplicates(allRoles)
+	logger.Info("All roles (including dependencies)", "roles", uniqueRoles)
+
+	// Process each role
+	hasTemplates, err := processRoles(uniqueRoles, env)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return uniqueRoles, hasTemplates, nil
+}
+
+// Gather all roles including dependencies
+func gatherAllRoles(directRoles []string, resolvedRoles map[string]bool) ([]string, error) {
 	var allRoles []string
 
 	for _, role := range directRoles {
@@ -204,13 +273,14 @@ func resolveAndProcessRoles(directRoles []string, env *Environment) ([]string, b
 		allRoles = append(allRoles, roleList...)
 	}
 
-	// Remove duplicates
-	uniqueRoles := removeDuplicates(allRoles)
-	logger.Info("All roles (including dependencies)", "roles", uniqueRoles)
+	return allRoles, nil
+}
 
-	// Process each role
+// Process all roles
+func processRoles(roles []string, env *Environment) (bool, error) {
 	hasTemplates := false
-	for _, role := range uniqueRoles {
+
+	for _, role := range roles {
 		logger.Info("Processing role", "name", role)
 
 		// Process the role's tasks
@@ -225,7 +295,7 @@ func resolveAndProcessRoles(directRoles []string, env *Environment) ([]string, b
 		}
 	}
 
-	return uniqueRoles, hasTemplates, nil
+	return hasTemplates, nil
 }
 
 // Copies the playbook to the temporary directory
@@ -269,6 +339,17 @@ pipelining = True
 	return nil
 }
 
+// Determines the output directory for a playbook
+func determineOutputDirectory(configOutputDir, playbookName, tempDir string) string {
+	// If output directory is explicitly specified in config, use it
+	if configOutputDir != "" {
+		return filepath.Join(configOutputDir, playbookName)
+	}
+
+	// Otherwise, use tmp-{playbookName}/output
+	return filepath.Join(tempDir, "output")
+}
+
 // Prints instructions for generate-only mode
 func printGenerateOnlyInstructions(env *Environment, outputDir string) {
 	relTempDir, err := filepath.Rel(".", env.TempDir)
@@ -306,7 +387,7 @@ func executeAnsible(env *Environment, outputDir string) error {
 	tempPlaybookBasename := filepath.Base(env.TempPlaybookPath)
 	err = executor.RunAnsible(tempPlaybookBasename, outputDir)
 	if err != nil {
-		return utils.NewError(utils.ErrAnsibleExecution, "executing ansible", err)
+		return utils.NewAnsibleExecutionError("executing ansible", err)
 	}
 
 	return nil

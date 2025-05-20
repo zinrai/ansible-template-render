@@ -10,8 +10,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Represents a role dependency
+type RoleDependency struct {
+	Name string
+}
+
+// Represents a role's meta information
+type RoleMeta struct {
+	Dependencies []interface{} `yaml:"dependencies"`
+}
+
+// Resolves role dependencies
+type RoleDependencyResolver struct{}
+
 // Gets the dependencies of a role
-func GetRoleDependencies(roleName string) ([]string, error) {
+func (r *RoleDependencyResolver) GetDependencies(roleName string) ([]string, error) {
 	metaPath, exists, err := finder.FindRoleMetaFile(roleName)
 	if err != nil {
 		return nil, err
@@ -23,22 +36,17 @@ func GetRoleDependencies(roleName string) ([]string, error) {
 	}
 
 	// Read and parse meta file
-	meta, err := loadRoleMeta(metaPath)
+	meta, err := r.loadRoleMeta(metaPath)
 	if err != nil {
 		return nil, err
 	}
 
 	// Extract dependencies
-	return extractDependencies(meta.Dependencies), nil
-}
-
-// Represents a role's meta information
-type RoleMeta struct {
-	Dependencies []interface{} `yaml:"dependencies"`
+	return r.extractDependencies(meta.Dependencies), nil
 }
 
 // Loads and parses a role's meta file
-func loadRoleMeta(metaPath string) (RoleMeta, error) {
+func (r *RoleDependencyResolver) loadRoleMeta(metaPath string) (RoleMeta, error) {
 	var meta RoleMeta
 
 	data, err := os.ReadFile(metaPath)
@@ -46,16 +54,26 @@ func loadRoleMeta(metaPath string) (RoleMeta, error) {
 		return meta, fmt.Errorf("reading meta file: %w", err)
 	}
 
-	if err := yaml.Unmarshal(data, &meta); err != nil {
+	err = yaml.Unmarshal(data, &meta)
+	if err != nil {
 		return meta, fmt.Errorf("parsing meta file: %w", err)
+	}
+
+	// Ensure Dependencies is never nil
+	if meta.Dependencies == nil {
+		meta.Dependencies = make([]interface{}, 0)
 	}
 
 	return meta, nil
 }
 
 // Extracts dependency role names
-func extractDependencies(dependencies []interface{}) []string {
-	var result []string
+func (r *RoleDependencyResolver) extractDependencies(dependencies []interface{}) []string {
+	result := make([]string, 0)
+
+	if dependencies == nil {
+		return result
+	}
 
 	for _, dep := range dependencies {
 		// Handle string dependencies
@@ -83,6 +101,12 @@ func extractDependencies(dependencies []interface{}) []string {
 	}
 
 	return result
+}
+
+// Gets the dependencies of a role
+func GetRoleDependencies(roleName string) ([]string, error) {
+	resolver := RoleDependencyResolver{}
+	return resolver.GetDependencies(roleName)
 }
 
 // Recursively resolves role dependencies

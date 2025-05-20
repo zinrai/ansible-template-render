@@ -4,6 +4,86 @@ import (
 	"fmt"
 )
 
+// Represents a task using the template module
+type TemplateTask struct {
+	Task       map[string]interface{}
+	ModuleKey  string
+	ModuleData map[string]interface{}
+}
+
+// Creates a new TemplateTask from a map
+func NewTemplateTask(task map[string]interface{}) (*TemplateTask, bool) {
+	moduleKey, moduleData := findTemplateModule(task)
+	if moduleKey == "" || moduleData == nil {
+		return nil, false
+	}
+
+	return &TemplateTask{
+		Task:       task,
+		ModuleKey:  moduleKey,
+		ModuleData: moduleData,
+	}, true
+}
+
+// Returns the destination path of the template
+func (t *TemplateTask) GetDestPath() string {
+	destPath, ok := t.ModuleData["dest"].(string)
+	if !ok {
+		return ""
+	}
+	return destPath
+}
+
+// Modifies the template task for rendering
+func (t *TemplateTask) Modify() {
+	// Modify destination path
+	t.modifyDestinationPath()
+
+	// Add render_config tag
+	t.ensureRenderConfigTag()
+
+	// Add delegation settings
+	t.Task["delegate_to"] = "localhost"
+	t.Task["run_once"] = true
+
+	// Remove notify field - not needed for configuration rendering
+	delete(t.Task, "notify")
+}
+
+// Adds template_dest_prefix to the destination path
+func (t *TemplateTask) modifyDestinationPath() {
+	destPath, ok := t.ModuleData["dest"].(string)
+	if !ok {
+		return
+	}
+
+	t.ModuleData["dest"] = fmt.Sprintf("{{ template_dest_prefix | default('') }}%s", destPath)
+	t.Task[t.ModuleKey] = t.ModuleData
+}
+
+// Ensures the render_config tag is present
+func (t *TemplateTask) ensureRenderConfigTag() {
+	existingTags, ok := t.Task["tags"].([]interface{})
+	if !ok {
+		// No tags exist, create new tags array
+		t.Task["tags"] = []interface{}{"render_config"}
+		return
+	}
+
+	// Copy existing tags
+	tags := make([]interface{}, len(existingTags))
+	copy(tags, existingTags)
+
+	// Check if render_config tag already exists
+	if hasRenderConfigTag(tags) {
+		t.Task["tags"] = tags
+		return
+	}
+
+	// Add render_config tag
+	t.Task["tags"] = append(tags, "render_config")
+}
+
 // Determines if a task uses the template module
 func IsTemplateTask(task map[string]interface{}) bool {
 	_, hasTemplate := task["template"]
@@ -17,24 +97,12 @@ func IsTemplateTask(task map[string]interface{}) bool {
 // - Setting delegate_to: localhost and run_once: true
 // - Removing notify handlers (not needed for rendering)
 func ModifyTemplateTask(task map[string]interface{}) {
-	// Find template module and key
-	moduleKey, templateModule := findTemplateModule(task)
-	if moduleKey == "" || templateModule == nil {
+	templateTask, isTemplate := NewTemplateTask(task)
+	if !isTemplate {
 		return
 	}
 
-	// Modify destination path
-	modifyDestinationPath(task, moduleKey, templateModule)
-
-	// Add render_config tag
-	ensureRenderConfigTag(task)
-
-	// Add delegation settings
-	task["delegate_to"] = "localhost"
-	task["run_once"] = true
-
-	// Remove notify field - not needed for configuration rendering
-	delete(task, "notify")
+	templateTask.Modify()
 }
 
 // Identifies the template module and its key
@@ -48,40 +116,6 @@ func findTemplateModule(task map[string]interface{}) (string, map[string]interfa
 	}
 
 	return "", nil
-}
-
-// Adds template_dest_prefix to the destination path
-func modifyDestinationPath(task map[string]interface{}, moduleKey string, templateModule map[string]interface{}) {
-	destPath, ok := templateModule["dest"].(string)
-	if !ok {
-		return
-	}
-
-	templateModule["dest"] = fmt.Sprintf("{{ template_dest_prefix | default('') }}%s", destPath)
-	task[moduleKey] = templateModule
-}
-
-// Ensures the render_config tag is present
-func ensureRenderConfigTag(task map[string]interface{}) {
-	existingTags, ok := task["tags"].([]interface{})
-	if !ok {
-		// No tags exist, create new tags array
-		task["tags"] = []interface{}{"render_config"}
-		return
-	}
-
-	// Copy existing tags
-	tags := make([]interface{}, len(existingTags))
-	copy(tags, existingTags)
-
-	// Check if render_config tag already exists
-	if hasRenderConfigTag(tags) {
-		task["tags"] = tags
-		return
-	}
-
-	// Add render_config tag
-	task["tags"] = append(tags, "render_config")
 }
 
 // Checks if render_config tag exists in tags array

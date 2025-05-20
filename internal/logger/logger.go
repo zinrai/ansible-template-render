@@ -6,15 +6,43 @@ import (
 	"os"
 )
 
+// Type that defines log levels
+type LogLevel string
+
+// Predefined log levels
+const (
+	DebugLevel LogLevel = "debug"
+	InfoLevel  LogLevel = "info"
+	WarnLevel  LogLevel = "warn"
+	ErrorLevel LogLevel = "error"
+)
+
 var defaultLogger *slog.Logger
 
+// Convert string to log level
+func ParseLogLevel(level LogLevel) slog.Level {
+	switch level {
+	case DebugLevel:
+		return slog.LevelDebug
+	case WarnLevel:
+		return slog.LevelWarn
+	case ErrorLevel:
+		return slog.LevelError
+	case InfoLevel:
+		fallthrough
+	default:
+		return slog.LevelInfo
+	}
+}
+
 // Sets up the default logger
-func Initialize(level slog.Level, output io.Writer) {
+func Initialize(level LogLevel, output io.Writer) {
 	if output == nil {
 		output = os.Stdout
 	}
 
-	opts := &slog.HandlerOptions{Level: level}
+	logLevel := ParseLogLevel(level)
+	opts := &slog.HandlerOptions{Level: logLevel}
 	handler := slog.NewTextHandler(output, opts)
 	defaultLogger = slog.New(handler)
 	slog.SetDefault(defaultLogger)
@@ -47,5 +75,5 @@ func With(args ...any) *slog.Logger {
 
 func init() {
 	// Default initialization with info level
-	Initialize(slog.LevelInfo, nil)
+	Initialize(InfoLevel, nil)
 }
