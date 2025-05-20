@@ -3,12 +3,12 @@ package generator
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/zinrai/ansible-template-render/internal/ansible"
 	"github.com/zinrai/ansible-template-render/internal/config"
 	"github.com/zinrai/ansible-template-render/internal/copier"
-	"github.com/zinrai/ansible-template-render/internal/executor"
 	"github.com/zinrai/ansible-template-render/internal/finder"
 	"github.com/zinrai/ansible-template-render/internal/logger"
 	"github.com/zinrai/ansible-template-render/internal/processor"
@@ -17,11 +17,6 @@ import (
 
 // Runs the template generation process based on the configuration
 func RunTemplateGeneration(cfg *config.Config) error {
-	// Ensure the output base directory exists
-	if err := os.MkdirAll(cfg.OutputBaseDir, 0755); err != nil {
-		return utils.NewError(utils.ErrUnknown, "failed to create output base directory", err)
-	}
-
 	// Process each playbook
 	for _, playbookConfig := range cfg.Playbooks {
 		logger.Info("Processing playbook", "name", playbookConfig.Name)
@@ -50,13 +45,11 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 		return err
 	}
 
-	// Clean up the environment when done, unless the user wants to keep it
-	if !cfg.Options.KeepTempFiles && !cfg.Options.GenerateOnly {
-		defer cleanupEnvironment(env)
-	}
+	// Always restore original directory when done
+	defer restoreOriginalDirectory(env)
 
 	// Process the playbook and roles
-	hasTemplates, err := processPlaybookContent(playbookPath, env)
+	hasTemplates, err := processPlaybookContent(playbookPath, env, playbookConfig.Name)
 	if err != nil {
 		return err
 	}
@@ -80,33 +73,29 @@ func setupAndValidateEnvironment(playbookName string, opts config.Options) (*Env
 	return env, nil
 }
 
+// Restore the original directory
+func restoreOriginalDirectory(env *Environment) {
+	if err := os.Chdir(env.OriginalDir); err != nil {
+		logger.Warn("Failed to change back to original directory", "error", err)
+	}
+}
+
 // Execute or generate instructions
 func executeOrGenerateInstructions(playbookConfig config.PlaybookConfig, cfg *config.Config, env *Environment, hasTemplates bool) error {
-	// Determine output directory
-	outputDir := determineOutputDirectory(cfg.OutputBaseDir, playbookConfig.Name, env.TempDir)
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return utils.NewError(utils.ErrUnknown, "creating output directory", err)
-	}
+	outputDir := filepath.Join(env.TempDir, "output")
 
 	// Generate-only mode: display instructions and exit
 	if cfg.Options.GenerateOnly {
-		printGenerateOnlyInstructions(env, outputDir)
+		printGenerateOnlyInstructions(env)
 		return nil
 	}
 
 	// Execute Ansible
-	if err := executeAnsible(env, outputDir); err != nil {
+	if err := executeAnsible(env); err != nil {
 		return err
 	}
 
 	logger.Info("Templates successfully rendered", "output", outputDir)
-
-	// If keeping temp files, inform the user
-	if cfg.Options.KeepTempFiles {
-		relTempDir, _ := filepath.Rel(".", env.TempDir)
-		logger.Info("Temporary files kept", "path", relTempDir)
-	}
-
 	return nil
 }
 
@@ -123,9 +112,13 @@ type Environment struct {
 func setupEnvironment(playbookName string, opts config.Options) (*Environment, error) {
 	// Create a temporary directory
 	tempDir := fmt.Sprintf("tmp-%s", playbookName)
+
+	// Remove existing directory if it exists
 	if err := os.RemoveAll(tempDir); err != nil {
-		return nil, utils.NewError(utils.ErrUnknown, "cleaning temp directory", err)
+		return nil, utils.NewError(utils.ErrUnknown, "cleaning existing directory", err)
 	}
+
+	// Create the directory
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return nil, utils.NewError(utils.ErrUnknown, "creating temp directory", err)
 	}
@@ -165,19 +158,8 @@ func createRequiredDirectories(tempDir string) error {
 	return nil
 }
 
-// Cleans up the processing environment
-func cleanupEnvironment(env *Environment) {
-	if err := os.Chdir(env.OriginalDir); err != nil {
-		logger.Warn("Failed to change back to original directory", "error", err)
-	}
-
-	if err := os.RemoveAll(env.TempDir); err != nil {
-		logger.Warn("Failed to remove temp directory", "error", err)
-	}
-}
-
 // Processes the content of a playbook
-func processPlaybookContent(playbookPath string, env *Environment) (bool, error) {
+func processPlaybookContent(playbookPath string, env *Environment, playbookName string) (bool, error) {
 	// Load the playbook
 	playbook, err := ansible.LoadPlaybook(playbookPath)
 	if err != nil {
@@ -218,7 +200,7 @@ func processPlaybookContent(playbookPath string, env *Environment) (bool, error)
 	}
 
 	// 6. Process tasks in each role
-	hasTemplates, err := processor.ProcessAllRoles(uniqueRoles, env.TempDir)
+	hasTemplates, err := processor.ProcessAllRoles(uniqueRoles, env.TempDir, playbookName)
 	if err != nil {
 		return false, utils.NewError(utils.ErrUnknown, "processing role tasks", err)
 	}
@@ -265,38 +247,22 @@ pipelining = True
 	return nil
 }
 
-// Determines the output directory for a playbook
-func determineOutputDirectory(configOutputDir, playbookName, tempDir string) string {
-	// If output directory is explicitly specified in config, use it
-	if configOutputDir != "" {
-		return filepath.Join(configOutputDir, playbookName)
-	}
-
-	// Otherwise, use tmp-{playbookName}/output
-	return filepath.Join(tempDir, "output")
-}
-
 // Prints instructions for generate-only mode
-func printGenerateOnlyInstructions(env *Environment, outputDir string) {
-	relTempDir, err := filepath.Rel(".", env.TempDir)
-	if err != nil {
-		relTempDir = env.TempDir
-	}
-
-	absAnsibleCfgPath, _ := filepath.Abs(env.AnsibleConfigPath)
+func printGenerateOnlyInstructions(env *Environment) {
 	tempPlaybookBasename := filepath.Base(env.TempPlaybookPath)
+	absAnsibleCfgPath, _ := filepath.Abs(env.AnsibleConfigPath)
 
 	logger.Info("Generated Ansible files in generate-only mode",
 		"playbook", tempPlaybookBasename,
-		"dir", relTempDir)
+		"dir", env.TempDir)
 
 	logger.Info("To execute manually:",
-		"command", fmt.Sprintf("cd %s && ANSIBLE_CONFIG=%s ansible-playbook %s --tags render_config -e \"template_dest_prefix=%s\"",
-			relTempDir, absAnsibleCfgPath, tempPlaybookBasename, outputDir))
+		"command", fmt.Sprintf("cd %s && ANSIBLE_CONFIG=%s ansible-playbook %s --tags render_config",
+			env.TempDir, absAnsibleCfgPath, tempPlaybookBasename))
 }
 
 // Executes Ansible in the temporary environment
-func executeAnsible(env *Environment, outputDir string) error {
+func executeAnsible(env *Environment) error {
 	// Change to the temporary directory
 	if err := os.Chdir(env.TempDir); err != nil {
 		return utils.NewError(utils.ErrUnknown, "changing to temp directory", err)
@@ -309,14 +275,21 @@ func executeAnsible(env *Environment, outputDir string) error {
 	}
 	os.Setenv("ANSIBLE_CONFIG", absAnsibleCfgPath)
 
-	// Execute Ansible
+	// Execute Ansible - removed template_dest_prefix parameter
 	tempPlaybookBasename := filepath.Base(env.TempPlaybookPath)
-	err = executor.RunAnsible(tempPlaybookBasename, outputDir)
-	if err != nil {
-		return utils.NewAnsibleExecutionError("executing ansible", err)
+	args := []string{
+		tempPlaybookBasename,
+		"--tags", "render_config",
 	}
 
-	return nil
+	cmd := exec.Command("ansible-playbook", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	cmdString := "ansible-playbook " + tempPlaybookBasename + " --tags render_config"
+	logger.Info("Executing Ansible command", "command", cmdString)
+
+	return cmd.Run()
 }
 
 // Removes duplicate strings from a slice

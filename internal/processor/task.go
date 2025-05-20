@@ -17,24 +17,28 @@ type TaskProcessor struct{}
 
 // Represents a directory creation task
 type DirectoryTask struct {
-	DestPath string
+	DestPath     string
+	PlaybookName string
 }
 
 // Creates a new directory task
-func NewDirectoryTask(destPath string) *DirectoryTask {
+func NewDirectoryTask(destPath string, playbookName string) *DirectoryTask {
 	return &DirectoryTask{
-		DestPath: destPath,
+		DestPath:     destPath,
+		PlaybookName: playbookName,
 	}
 }
 
 // Converts the directory task to a map representation
 func (d *DirectoryTask) ToMap() map[string]interface{} {
-	dirPath := filepath.Dir(d.DestPath)
+	// Create the full output path
+	outputPath := filepath.Join(fmt.Sprintf("tmp-%s/output", d.PlaybookName), d.DestPath)
+	dirPath := filepath.Dir(outputPath)
 
 	return map[string]interface{}{
-		"name": fmt.Sprintf("Ensure directory exists for %s", d.DestPath),
+		"name": fmt.Sprintf("Ensure directory exists for %s", outputPath),
 		"file": map[string]interface{}{
-			"path":  fmt.Sprintf("{{ template_dest_prefix | default('') }}%s", dirPath),
+			"path":  dirPath,
 			"state": "directory",
 			"mode":  "0755",
 		},
@@ -52,7 +56,7 @@ type ProcessResult struct {
 }
 
 // Processes template tasks, inserting directory creation tasks and modifying templates
-func ProcessTemplateTasks(tasks []map[string]interface{}, taskFile string) ProcessResult {
+func ProcessTemplateTasks(tasks []map[string]interface{}, taskFile string, playbookName string) ProcessResult {
 	var result []map[string]interface{}
 	modified := false
 	hasTemplates := false
@@ -61,7 +65,7 @@ func ProcessTemplateTasks(tasks []map[string]interface{}, taskFile string) Proce
 	for _, task := range tasks {
 		if ansible.IsTemplateTask(task) {
 			// Handle template task
-			taskResult, dirModified := handleTemplateTask(task, processedDirs, taskFile)
+			taskResult, dirModified := handleTemplateTask(task, processedDirs, taskFile, playbookName)
 			result = append(result, taskResult...)
 
 			modified = true
@@ -83,7 +87,7 @@ func ProcessTemplateTasks(tasks []map[string]interface{}, taskFile string) Proce
 }
 
 // Processes a single template task
-func handleTemplateTask(task map[string]interface{}, processedDirs map[string]bool, taskFile string) ([]map[string]interface{}, bool) {
+func handleTemplateTask(task map[string]interface{}, processedDirs map[string]bool, taskFile string, playbookName string) ([]map[string]interface{}, bool) {
 	var result []map[string]interface{}
 	dirModified := false
 
@@ -91,14 +95,14 @@ func handleTemplateTask(task map[string]interface{}, processedDirs map[string]bo
 	templateTask, _ := ansible.NewTemplateTask(task)
 
 	// Add directory task if needed
-	dirTask := createDirectoryTaskIfNeeded(templateTask, processedDirs)
+	dirTask := createDirectoryTaskIfNeeded(templateTask, processedDirs, playbookName)
 	if dirTask != nil {
 		result = append(result, dirTask)
 		dirModified = true
 	}
 
 	// Copy and modify template task
-	modifiedTask := copyAndModifyTemplateTask(task)
+	modifiedTask := copyAndModifyTemplateTask(task, playbookName)
 	result = append(result, modifiedTask)
 
 	logger.Info("Modified template task", "file", taskFile)
@@ -107,31 +111,34 @@ func handleTemplateTask(task map[string]interface{}, processedDirs map[string]bo
 }
 
 // Creates a directory task if needed
-func createDirectoryTaskIfNeeded(templateTask *ansible.TemplateTask, processedDirs map[string]bool) map[string]interface{} {
+func createDirectoryTaskIfNeeded(templateTask *ansible.TemplateTask, processedDirs map[string]bool, playbookName string) map[string]interface{} {
 	destPath := templateTask.GetDestPath()
 	if destPath == "" {
 		return nil
 	}
 
-	dirPath := filepath.Dir(destPath)
+	// Create the full output path
+	outputPath := filepath.Join(fmt.Sprintf("tmp-%s/output", playbookName), destPath)
+	dirPath := filepath.Dir(outputPath)
+
 	if processedDirs[dirPath] {
 		return nil
 	}
 
 	processedDirs[dirPath] = true
-	return NewDirectoryTask(destPath).ToMap()
+	return NewDirectoryTask(destPath, playbookName).ToMap()
 }
 
 // Creates a modified copy of a template task
-func copyAndModifyTemplateTask(task map[string]interface{}) map[string]interface{} {
+func copyAndModifyTemplateTask(task map[string]interface{}, playbookName string) map[string]interface{} {
 	taskCopy, err := utils.DeepCopy(task)
 	if err != nil {
 		logger.Warn("Error copying task", "error", err)
 		return task // Use original if copying fails
 	}
 
-	// Modify the template task
-	ansible.ModifyTemplateTask(taskCopy.(map[string]interface{}))
+	// Modify the template task with playbook name
+	ansible.ModifyTemplateTask(taskCopy.(map[string]interface{}), playbookName)
 	return taskCopy.(map[string]interface{})
 }
 
@@ -146,7 +153,7 @@ func getTemplateDestPath(task map[string]interface{}) string {
 }
 
 // Processes all tasks in a role, looking for and modifying templates
-func (p *TaskProcessor) ProcessRoleTasks(roleName, tempDir string) (bool, error) {
+func (p *TaskProcessor) ProcessRoleTasks(roleName, tempDir string, playbookName string) (bool, error) {
 	// Find task files
 	taskFiles, err := finder.FindRoleTasks(roleName)
 	if err != nil {
@@ -166,7 +173,7 @@ func (p *TaskProcessor) ProcessRoleTasks(roleName, tempDir string) (bool, error)
 
 	// Process each task file
 	for _, taskFile := range taskFiles {
-		fileHasTemplates, err := p.ProcessTaskFile(taskFile, tempDir)
+		fileHasTemplates, err := p.ProcessTaskFile(taskFile, tempDir, playbookName)
 		if err != nil {
 			return false, err
 		}
@@ -180,7 +187,7 @@ func (p *TaskProcessor) ProcessRoleTasks(roleName, tempDir string) (bool, error)
 }
 
 // Processes a single task file
-func (p *TaskProcessor) ProcessTaskFile(taskFile, tempDir string) (bool, error) {
+func (p *TaskProcessor) ProcessTaskFile(taskFile, tempDir string, playbookName string) (bool, error) {
 	// Create the corresponding path in the temporary directory
 	relPath, err := filepath.Rel(".", taskFile)
 	if err != nil {
@@ -196,7 +203,7 @@ func (p *TaskProcessor) ProcessTaskFile(taskFile, tempDir string) (bool, error) 
 	}
 
 	// Process the tasks
-	result := ProcessTemplateTasks(tasks, taskFile)
+	result := ProcessTemplateTasks(tasks, taskFile, playbookName)
 
 	// No modifications needed, just copy the file
 	if !result.Modified {
@@ -221,14 +228,14 @@ func (p *TaskProcessor) ProcessTaskFile(taskFile, tempDir string) (bool, error) 
 }
 
 // Processes tasks for all roles
-func ProcessAllRoles(roles []string, tempDir string) (bool, error) {
+func ProcessAllRoles(roles []string, tempDir string, playbookName string) (bool, error) {
 	processor := &TaskProcessor{}
 	hasTemplates := false
 
 	for _, roleName := range roles {
 		logger.Info("Processing role tasks", "name", roleName)
 
-		roleHasTemplates, err := processor.ProcessRoleTasks(roleName, tempDir)
+		roleHasTemplates, err := processor.ProcessRoleTasks(roleName, tempDir, playbookName)
 		if err != nil {
 			logger.Warn("Error processing role tasks", "role", roleName, "error", err)
 			continue // Skip to next role

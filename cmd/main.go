@@ -16,9 +16,7 @@ var (
 
 func main() {
 	configFile := flag.String("config", "", "Config file path")
-	outputDir := flag.String("output-dir", "", "Override output directory")
 	showVersion := flag.Bool("version", false, "Show version")
-	keepTempFiles := flag.Bool("keep-temp", false, "Keep temporary files")
 	generateOnly := flag.Bool("generate-only", false, "Generate modified Ansible files without executing")
 	logLevel := flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	flag.Parse()
@@ -45,13 +43,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Override output directory if specified
-	if *outputDir != "" {
-		cfg.OutputBaseDir = *outputDir
-	}
-
 	// Override options if specified
-	cfg.Options.KeepTempFiles = *keepTempFiles || cfg.Options.KeepTempFiles
 	cfg.Options.GenerateOnly = *generateOnly || cfg.Options.GenerateOnly
 
 	// Run template generation
@@ -62,7 +54,7 @@ func main() {
 	}
 
 	if cfg.Options.GenerateOnly {
-		logger.Info("Modified Ansible files generated successfully. Use --keep-temp to see the files.")
+		logger.Info("Modified Ansible files generated successfully.")
 	} else {
 		logger.Info("Successfully generated template files")
 	}

@@ -99,7 +99,8 @@ func TestProcessTemplateTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ProcessTemplateTasks(tt.tasks, "test_file.yml")
+			// Pass a test playbook name
+			result := ProcessTemplateTasks(tt.tasks, "test_file.yml", "test-playbook")
 
 			if result.Modified != tt.expectedModified {
 				t.Errorf("ProcessTemplateTasks().Modified = %v, want %v", result.Modified, tt.expectedModified)
@@ -133,11 +134,11 @@ func TestProcessTemplateTasks(t *testing.T) {
 			if tt.expectedHasTemplates {
 				for _, task := range result.Tasks {
 					if ansible.IsTemplateTask(task) {
-						// Check if template dest includes template_dest_prefix
+						// Check if template dest includes the correct path
 						templateTask, _ := ansible.NewTemplateTask(task)
 						destPath := templateTask.GetDestPath()
-						if !strings.Contains(destPath, "template_dest_prefix") {
-							t.Errorf("Template task not modified: %v", destPath)
+						if !strings.Contains(destPath, "tmp-test-playbook/output") {
+							t.Errorf("Template task not modified correctly: %v", destPath)
 						}
 
 						// Check notify removed
@@ -179,7 +180,7 @@ func TestHandleTemplateTask(t *testing.T) {
 					"dest": "/etc/app/app.conf",
 				},
 			},
-			existingDirs:     map[string]bool{"/etc/app": true},
+			existingDirs:     map[string]bool{"tmp-test-playbook/output/etc/app": true},
 			expectedTasksLen: 1, // Only template task
 			expectedDirAdded: false,
 		},
@@ -204,7 +205,8 @@ func TestHandleTemplateTask(t *testing.T) {
 				processedDirs[k] = v
 			}
 
-			tasks, dirAdded := handleTemplateTask(tt.task, processedDirs, "test_file.yml")
+			// Pass a test playbook name
+			tasks, dirAdded := handleTemplateTask(tt.task, processedDirs, "test_file.yml", "test-playbook")
 
 			if len(tasks) != tt.expectedTasksLen {
 				t.Errorf("handleTemplateTask() returned %d tasks, want %d", len(tasks), tt.expectedTasksLen)
@@ -249,7 +251,7 @@ func TestCreateDirectoryTaskIfNeeded(t *testing.T) {
 		{
 			name:         "existing directory",
 			destPath:     "/etc/app/config.conf",
-			existingDirs: map[string]bool{"/etc/app": true},
+			existingDirs: map[string]bool{"tmp-test-playbook/output/etc/app": true},
 			expectTask:   false,
 		},
 		{
@@ -275,7 +277,8 @@ func TestCreateDirectoryTaskIfNeeded(t *testing.T) {
 				processedDirs[k] = v
 			}
 
-			dirTask := createDirectoryTaskIfNeeded(templateTask, processedDirs)
+			// Pass a test playbook name
+			dirTask := createDirectoryTaskIfNeeded(templateTask, processedDirs, "test-playbook")
 
 			if tt.expectTask && dirTask == nil {
 				t.Errorf("createDirectoryTaskIfNeeded() returned nil, expected a task")
@@ -287,7 +290,8 @@ func TestCreateDirectoryTaskIfNeeded(t *testing.T) {
 
 			// If a task was created, check that the directory was marked as processed
 			if tt.expectTask {
-				dirPath := filepath.Dir(tt.destPath)
+				outputPath := filepath.Join("tmp-test-playbook/output", tt.destPath)
+				dirPath := filepath.Dir(outputPath)
 				if !processedDirs[dirPath] {
 					t.Errorf("Directory %s not marked as processed", dirPath)
 				}
@@ -324,18 +328,19 @@ func TestCopyAndModifyTemplateTask(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			modifiedTask := copyAndModifyTemplateTask(tt.task)
+			// Pass a test playbook name
+			modifiedTask := copyAndModifyTemplateTask(tt.task, "test-playbook")
 
 			// Verify it's not the same object reference
 			if &modifiedTask == &tt.task {
 				t.Errorf("copyAndModifyTemplateTask() returned the same object, expected a copy")
 			}
 
-			// Check if template dest includes template_dest_prefix
+			// Check if template dest includes correct path
 			templateTask, _ := ansible.NewTemplateTask(modifiedTask)
 			destPath := templateTask.GetDestPath()
-			if !strings.Contains(destPath, "template_dest_prefix") {
-				t.Errorf("Template task not modified: %v", destPath)
+			if !strings.Contains(destPath, "tmp-test-playbook/output") {
+				t.Errorf("Template task not modified correctly: %v", destPath)
 			}
 
 			// Check if notify was removed
@@ -361,6 +366,7 @@ func TestDirectoryTask_ToMap(t *testing.T) {
 	tests := []struct {
 		name            string
 		destPath        string
+		playbookName    string
 		expectedPath    string
 		expectedName    string
 		expectedState   string
@@ -370,8 +376,9 @@ func TestDirectoryTask_ToMap(t *testing.T) {
 		{
 			name:            "simple path",
 			destPath:        "/etc/app.conf",
-			expectedPath:    "{{ template_dest_prefix | default('') }}/etc",
-			expectedName:    "Ensure directory exists for /etc/app.conf",
+			playbookName:    "test-playbook",
+			expectedPath:    "tmp-test-playbook/output/etc",
+			expectedName:    "Ensure directory exists for tmp-test-playbook/output/etc/app.conf",
 			expectedState:   "directory",
 			expectedTags:    []interface{}{"render_config"},
 			expectedRunOnce: true,
@@ -379,8 +386,9 @@ func TestDirectoryTask_ToMap(t *testing.T) {
 		{
 			name:            "nested path",
 			destPath:        "/var/lib/app/data/config.dat",
-			expectedPath:    "{{ template_dest_prefix | default('') }}/var/lib/app/data",
-			expectedName:    "Ensure directory exists for /var/lib/app/data/config.dat",
+			playbookName:    "test-playbook",
+			expectedPath:    "tmp-test-playbook/output/var/lib/app/data",
+			expectedName:    "Ensure directory exists for tmp-test-playbook/output/var/lib/app/data/config.dat",
 			expectedState:   "directory",
 			expectedTags:    []interface{}{"render_config"},
 			expectedRunOnce: true,
@@ -389,7 +397,7 @@ func TestDirectoryTask_ToMap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dirTask := NewDirectoryTask(tt.destPath)
+			dirTask := NewDirectoryTask(tt.destPath, tt.playbookName)
 			result := dirTask.ToMap()
 
 			// Check task name

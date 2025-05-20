@@ -171,12 +171,12 @@ func TestTemplateTask_Modify(t *testing.T) {
 		t.Fatalf("NewTemplateTask() failed to recognize template task")
 	}
 
-	// Modify the task
-	templateTask.Modify()
+	// Modify the task - Added "test-playbook" as playbookName argument
+	templateTask.Modify("test-playbook")
 
 	// Verify destination path has the prefix
 	module := fullTask["template"].(map[string]interface{})
-	expectedDest := "{{ template_dest_prefix | default('') }}/etc/app/config.conf"
+	expectedDest := "tmp-test-playbook/output/etc/app/config.conf"
 	if module["dest"] != expectedDest {
 		t.Errorf("Destination not modified correctly: got %v, want %v", module["dest"], expectedDest)
 	}
@@ -216,8 +216,8 @@ func TestModifyTemplateTask(t *testing.T) {
 		nonTemplateCopy[k] = v
 	}
 
-	// Test with non-template task
-	ModifyTemplateTask(nonTemplateTask)
+	// Test with non-template task - Added "test-playbook" as playbookName argument
+	ModifyTemplateTask(nonTemplateTask, "test-playbook")
 	if !reflect.DeepEqual(nonTemplateTask, nonTemplateCopy) {
 		t.Errorf("ModifyTemplateTask() should not modify non-template tasks")
 	}
@@ -231,12 +231,12 @@ func TestModifyTemplateTask(t *testing.T) {
 		"notify": []interface{}{"restart app"},
 	}
 
-	// Modify the task
-	ModifyTemplateTask(templateTask)
+	// Modify the task - Added "test-playbook" as playbookName argument
+	ModifyTemplateTask(templateTask, "test-playbook")
 
 	// Verify task was modified
 	module := templateTask["template"].(map[string]interface{})
-	if !strings.Contains(module["dest"].(string), "template_dest_prefix") {
+	if !strings.Contains(module["dest"].(string), "tmp-test-playbook/output") {
 		t.Errorf("ModifyTemplateTask() did not modify the destination path")
 	}
 

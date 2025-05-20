@@ -2,6 +2,7 @@ package ansible
 
 import (
 	"fmt"
+	"path/filepath"
 )
 
 // Represents a task using the template module
@@ -35,9 +36,15 @@ func (t *TemplateTask) GetDestPath() string {
 }
 
 // Modifies the template task for rendering
-func (t *TemplateTask) Modify() {
-	// Modify destination path
-	t.modifyDestinationPath()
+func (t *TemplateTask) Modify(playbookName string) {
+	destPath, ok := t.ModuleData["dest"].(string)
+	if !ok {
+		return
+	}
+
+	// Use fixed output path based on playbook name
+	t.ModuleData["dest"] = filepath.Join(fmt.Sprintf("tmp-%s/output", playbookName), destPath)
+	t.Task[t.ModuleKey] = t.ModuleData
 
 	// Add render_config tag
 	t.ensureRenderConfigTag()
@@ -48,17 +55,6 @@ func (t *TemplateTask) Modify() {
 
 	// Remove notify field - not needed for configuration rendering
 	delete(t.Task, "notify")
-}
-
-// Adds template_dest_prefix to the destination path
-func (t *TemplateTask) modifyDestinationPath() {
-	destPath, ok := t.ModuleData["dest"].(string)
-	if !ok {
-		return
-	}
-
-	t.ModuleData["dest"] = fmt.Sprintf("{{ template_dest_prefix | default('') }}%s", destPath)
-	t.Task[t.ModuleKey] = t.ModuleData
 }
 
 // Ensures the render_config tag is present
@@ -96,13 +92,13 @@ func IsTemplateTask(task map[string]interface{}) bool {
 // - Adding render_config tag
 // - Setting delegate_to: localhost and run_once: true
 // - Removing notify handlers (not needed for rendering)
-func ModifyTemplateTask(task map[string]interface{}) {
+func ModifyTemplateTask(task map[string]interface{}, playbookName string) {
 	templateTask, isTemplate := NewTemplateTask(task)
 	if !isTemplate {
 		return
 	}
 
-	templateTask.Modify()
+	templateTask.Modify(playbookName)
 }
 
 // Identifies the template module and its key
