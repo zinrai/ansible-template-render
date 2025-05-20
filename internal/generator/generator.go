@@ -7,9 +7,11 @@ import (
 
 	"github.com/zinrai/ansible-template-render/internal/ansible"
 	"github.com/zinrai/ansible-template-render/internal/config"
+	"github.com/zinrai/ansible-template-render/internal/copier"
 	"github.com/zinrai/ansible-template-render/internal/executor"
 	"github.com/zinrai/ansible-template-render/internal/finder"
 	"github.com/zinrai/ansible-template-render/internal/logger"
+	"github.com/zinrai/ansible-template-render/internal/processor"
 	"github.com/zinrai/ansible-template-render/internal/utils"
 )
 
@@ -53,8 +55,8 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 		defer cleanupEnvironment(env)
 	}
 
-	// Process roles and templates
-	hasTemplates, err := processPlaybookRolesAndTemplates(playbookPath, env)
+	// Process the playbook and roles
+	hasTemplates, err := processPlaybookContent(playbookPath, env)
 	if err != nil {
 		return err
 	}
@@ -76,17 +78,6 @@ func setupAndValidateEnvironment(playbookName string, opts config.Options) (*Env
 	}
 
 	return env, nil
-}
-
-// Process playbook roles and templates
-func processPlaybookRolesAndTemplates(playbookPath string, env *Environment) (bool, error) {
-	// Process roles and templates
-	hasTemplates, err := processPlaybookContent(playbookPath, env)
-	if err != nil {
-		return false, err
-	}
-
-	return hasTemplates, nil
 }
 
 // Execute or generate instructions
@@ -193,71 +184,46 @@ func processPlaybookContent(playbookPath string, env *Environment) (bool, error)
 		return false, utils.NewError(utils.ErrUnknown, "loading playbook", err)
 	}
 
-	// Extract and process roles
-	hasTemplates, err := extractAndProcessRoles(playbook, env)
+	// 1. Copy the playbook to temp directory
+	playbookCopier := &copier.PlaybookCopier{}
+	tempPlaybookPath, err := playbookCopier.CopyPlaybook(playbookPath, env.TempDir)
 	if err != nil {
+		return false, utils.NewError(utils.ErrUnknown, "copying playbook", err)
+	}
+	env.PlaybookPath = playbookPath
+	env.TempPlaybookPath = tempPlaybookPath
+
+	// 2. Create Ansible configuration
+	if err := createAnsibleConfig(env); err != nil {
 		return false, err
 	}
 
-	// Copy the playbook and create config
-	if err := preparePlaybookFiles(playbookPath, env); err != nil {
-		return false, err
-	}
-
-	return hasTemplates, nil
-}
-
-// Extract and process roles from the playbook
-func extractAndProcessRoles(playbook []map[string]interface{}, env *Environment) (bool, error) {
-	// Extract roles from the playbook
+	// 3. Extract roles from the playbook and resolve dependencies
 	directRoles := ansible.ExtractRolesFromPlaybook(playbook)
 	logger.Info("Found direct roles", "roles", directRoles)
 
-	// Process all roles and their dependencies
-	_, hasTemplates, err := resolveAndProcessRoles(directRoles, env)
+	resolvedRoles := make(map[string]bool)
+	allRoles, err := gatherAllRoles(directRoles, resolvedRoles)
 	if err != nil {
 		return false, err
 	}
 
-	return hasTemplates, nil
-}
-
-// Prepare playbook files (copy and create config)
-func preparePlaybookFiles(playbookPath string, env *Environment) error {
-	// Copy the playbook file to the temporary directory
-	if err := copyPlaybookToTemp(playbookPath, env); err != nil {
-		return err
-	}
-
-	// Create Ansible configuration
-	if err := createAnsibleConfig(env); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// Resolves role dependencies and processes all roles
-func resolveAndProcessRoles(directRoles []string, env *Environment) ([]string, bool, error) {
-	// Resolve role dependencies
-	resolvedRoles := make(map[string]bool)
-	allRoles, err := gatherAllRoles(directRoles, resolvedRoles)
-	if err != nil {
-		// Error already logged in gatherAllRoles
-		return nil, false, nil
-	}
-
-	// Remove duplicates
+	// 4. Remove duplicates
 	uniqueRoles := removeDuplicates(allRoles)
 	logger.Info("All roles (including dependencies)", "roles", uniqueRoles)
 
-	// Process each role
-	hasTemplates, err := processRoles(uniqueRoles, env)
-	if err != nil {
-		return nil, false, err
+	// 5. Copy all roles to temp directory
+	if err := copier.CopyAllRoles(uniqueRoles, env.TempDir); err != nil {
+		return false, utils.NewError(utils.ErrUnknown, "copying roles", err)
 	}
 
-	return uniqueRoles, hasTemplates, nil
+	// 6. Process tasks in each role
+	hasTemplates, err := processor.ProcessAllRoles(uniqueRoles, env.TempDir)
+	if err != nil {
+		return false, utils.NewError(utils.ErrUnknown, "processing role tasks", err)
+	}
+
+	return hasTemplates, nil
 }
 
 // Gather all roles including dependencies
@@ -274,46 +240,6 @@ func gatherAllRoles(directRoles []string, resolvedRoles map[string]bool) ([]stri
 	}
 
 	return allRoles, nil
-}
-
-// Process all roles
-func processRoles(roles []string, env *Environment) (bool, error) {
-	hasTemplates := false
-
-	for _, role := range roles {
-		logger.Info("Processing role", "name", role)
-
-		// Process the role's tasks
-		roleHasTemplates, err := ProcessRoleTasks(role, env.TempDir)
-		if err != nil {
-			logger.Warn("Error processing role", "role", role, "error", err)
-			continue
-		}
-
-		if roleHasTemplates {
-			hasTemplates = true
-		}
-	}
-
-	return hasTemplates, nil
-}
-
-// Copies the playbook to the temporary directory
-func copyPlaybookToTemp(playbookPath string, env *Environment) error {
-	tempPlaybookPath := filepath.Join(env.TempDir, filepath.Base(playbookPath))
-
-	if err := os.MkdirAll(filepath.Dir(tempPlaybookPath), 0755); err != nil {
-		return utils.NewError(utils.ErrUnknown, "creating temp playbook directory", err)
-	}
-
-	if err := utils.CopyFile(playbookPath, tempPlaybookPath); err != nil {
-		return utils.NewError(utils.ErrUnknown, "copying playbook file", err)
-	}
-
-	env.PlaybookPath = playbookPath
-	env.TempPlaybookPath = tempPlaybookPath
-
-	return nil
 }
 
 // Creates the Ansible configuration file

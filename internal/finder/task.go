@@ -13,7 +13,10 @@ func FindRoleTasks(roleName string) ([]string, error) {
 	// Check if tasks directory exists
 	_, err := os.Stat(tasksDir)
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("role tasks directory not found: %s", tasksDir)
+		// Return empty slice instead of error for missing tasks directory
+		return []string{}, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("checking tasks directory: %w", err)
 	}
 
 	// Find .yml files
