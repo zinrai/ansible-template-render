@@ -34,35 +34,111 @@ func (c *RoleCopier) CopyRole(roleName string, destDir string) error {
 
 // Recursively copies the role contents
 func (c *RoleCopier) copyRoleContents(srcPath, destPath string) error {
-	return filepath.Walk(srcPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
+	logger.Debug("Walking directory", "path", srcPath)
+
+	// Check if directory exists (follow symlinks)
+	if err := c.validateSourceDirectory(srcPath); err != nil {
+		return err
+	}
+
+	// Get directory entries
+	entries, err := os.ReadDir(srcPath)
+	if err != nil {
+		return fmt.Errorf("reading directory %s: %w", srcPath, err)
+	}
+
+	logger.Debug("Directory entries", "path", srcPath, "count", len(entries))
+
+	// Process directories first
+	if err := c.copyDirectories(srcPath, destPath, entries); err != nil {
+		return err
+	}
+
+	// Then process files
+	if err := c.copyFiles(srcPath, destPath, entries); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Validates that the source path is a directory
+func (c *RoleCopier) validateSourceDirectory(srcPath string) error {
+	srcInfo, err := os.Stat(srcPath) // Stat follows symlinks
+	if err != nil {
+		return fmt.Errorf("checking source path %s: %w", srcPath, err)
+	}
+
+	if !srcInfo.IsDir() {
+		return fmt.Errorf("source path is not a directory: %s", srcPath)
+	}
+
+	return nil
+}
+
+// Copies directories recursively
+func (c *RoleCopier) copyDirectories(srcPath, destPath string, entries []os.DirEntry) error {
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		entryPath := filepath.Join(srcPath, entry.Name())
+		destEntryPath := filepath.Join(destPath, entry.Name())
+
+		// Create the directory
+		if err := os.MkdirAll(destEntryPath, 0755); err != nil {
+			return fmt.Errorf("creating directory %s: %w", destEntryPath, err)
+		}
+
+		// Recursively copy subdirectory
+		if err := c.copyRoleContents(entryPath, destEntryPath); err != nil {
 			return err
 		}
+	}
 
-		// Skip if same as source directory
-		if path == srcPath {
-			return nil
+	return nil
+}
+
+// Copies files
+func (c *RoleCopier) copyFiles(srcPath, destPath string, entries []os.DirEntry) error {
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
 		}
 
-		// Calculate relative path
-		relPath, err := filepath.Rel(srcPath, path)
-		if err != nil {
-			return fmt.Errorf("calculating relative path: %w", err)
+		entryPath := filepath.Join(srcPath, entry.Name())
+		destEntryPath := filepath.Join(destPath, entry.Name())
+
+		// Handle regular files and symlinks
+		if err := c.copyFileWithLogging(entryPath, destEntryPath); err != nil {
+			// Log but continue with other files
+			logger.Warn("Error copying file", "src", entryPath, "dest", destEntryPath, "error", err)
 		}
+	}
 
-		destItemPath := filepath.Join(destPath, relPath)
+	return nil
+}
 
-		if info.IsDir() {
-			// Create directory
-			if err := os.MkdirAll(destItemPath, 0755); err != nil {
-				return fmt.Errorf("creating directory %s: %w", destItemPath, err)
-			}
-			return nil
-		}
+// Copies a file with proper error handling and logging
+func (c *RoleCopier) copyFileWithLogging(srcPath, destPath string) error {
+	// Get file info (following symlinks)
+	fileInfo, err := os.Stat(srcPath)
+	if err != nil {
+		return fmt.Errorf("getting file info: %w", err)
+	}
 
-		// Copy file
-		return utils.CopyFile(path, destItemPath)
-	})
+	if fileInfo.IsDir() {
+		// This shouldn't happen but check anyway
+		return fmt.Errorf("expected file but found directory: %s", srcPath)
+	}
+
+	logger.Debug("Copying file", "src", srcPath, "dest", destPath)
+	if err := utils.CopyFile(srcPath, destPath); err != nil {
+		return fmt.Errorf("copying file: %w", err)
+	}
+
+	return nil
 }
 
 // Copies all specified roles to the destination directory
