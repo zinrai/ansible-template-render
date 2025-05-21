@@ -3,12 +3,12 @@ package generator
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/zinrai/ansible-template-render/internal/ansible"
 	"github.com/zinrai/ansible-template-render/internal/config"
 	"github.com/zinrai/ansible-template-render/internal/copier"
+	"github.com/zinrai/ansible-template-render/internal/executor"
 	"github.com/zinrai/ansible-template-render/internal/finder"
 	"github.com/zinrai/ansible-template-render/internal/logger"
 	"github.com/zinrai/ansible-template-render/internal/processor"
@@ -254,14 +254,9 @@ func createAnsibleConfig(env *Environment) error {
 	ansibleCfgPath := filepath.Join(env.TempDir, "ansible.cfg")
 
 	ansibleCfgContent := fmt.Sprintf(`[defaults]
-roles_path = %s
-host_key_checking = False
 retry_files_enabled = False
-local_tmp = %s/ansible-tmp
-
-[ssh_connection]
-pipelining = True
-`, filepath.Join(env.TempDir, "roles"), env.TempDir)
+local_tmp = ansible-tmp
+`)
 
 	if err := os.WriteFile(ansibleCfgPath, []byte(ansibleCfgContent), 0644); err != nil {
 		return utils.NewError(utils.ErrUnknown, "writing ansible.cfg file", err)
@@ -276,49 +271,30 @@ pipelining = True
 func printGenerateOnlyInstructions(env *Environment) {
 	tempPlaybookBasename := filepath.Base(env.TempPlaybookPath)
 	absAnsibleCfgPath, _ := filepath.Abs(env.AnsibleConfigPath)
+	inventoryBasename := filepath.Base(env.InventoryPath)
 
 	logger.Info("Generated Ansible files in generate-only mode",
 		"playbook", tempPlaybookBasename,
-		"inventory", env.InventoryPath,
+		"inventory", inventoryBasename,
 		"dir", env.TempDir)
 
 	logger.Info("To execute manually:",
 		"command", fmt.Sprintf("cd %s && ANSIBLE_CONFIG=%s ansible-playbook %s --tags render_config -i %s",
-			env.TempDir, absAnsibleCfgPath, tempPlaybookBasename, env.InventoryPath))
+			env.TempDir, absAnsibleCfgPath, tempPlaybookBasename, inventoryBasename))
 }
 
 // Executes Ansible in the temporary environment
 func executeAnsible(env *Environment) error {
-	// Change to the temporary directory
-	if err := os.Chdir(env.TempDir); err != nil {
-		return utils.NewError(utils.ErrUnknown, "changing to temp directory", err)
+	// Prepare Ansible execution environment
+	execEnv := executor.ExecutionEnvironment{
+		WorkingDir:        env.TempDir,
+		PlaybookPath:      filepath.Base(env.TempPlaybookPath),
+		InventoryPath:     filepath.Base(env.InventoryPath),
+		AnsibleConfigPath: env.AnsibleConfigPath,
 	}
 
-	// Set the ANSIBLE_CONFIG environment variable
-	absAnsibleCfgPath, err := filepath.Abs(env.AnsibleConfigPath)
-	if err != nil {
-		return utils.NewError(utils.ErrUnknown, "getting absolute path for ansible.cfg", err)
-	}
-	os.Setenv("ANSIBLE_CONFIG", absAnsibleCfgPath)
-
-	// Execute Ansible with inventory
-	tempPlaybookBasename := filepath.Base(env.TempPlaybookPath)
-	args := []string{
-		tempPlaybookBasename,
-		"--tags", "render_config",
-		"-i", env.InventoryPath,
-	}
-
-	cmd := exec.Command("ansible-playbook", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// Command string for logging
-	cmdString := fmt.Sprintf("ansible-playbook %s --tags render_config -i %s",
-		tempPlaybookBasename, env.InventoryPath)
-	logger.Info("Executing Ansible command", "command", cmdString)
-
-	return cmd.Run()
+	// Call the executor package function
+	return executor.RunAnsible(execEnv)
 }
 
 // Removes duplicate strings from a slice
