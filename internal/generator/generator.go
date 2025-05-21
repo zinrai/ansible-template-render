@@ -66,6 +66,13 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 	env.InventoryPath = tempInventoryPath
 	logger.Info("Copied inventory file", "path", tempInventoryPath)
 
+	// Modify inventory to use local connection for all hosts
+	err = processor.ModifyInventoryForLocalExecution(tempInventoryPath)
+	if err != nil {
+		return utils.NewError(utils.ErrUnknown, "modifying inventory for local execution", err)
+	}
+	logger.Info("Modified inventory for local execution", "path", tempInventoryPath)
+
 	// Copy vars directories to temp directory
 	err = copier.CopyVarsDirectories(varsDirectories, env.TempDir)
 	if err != nil {
