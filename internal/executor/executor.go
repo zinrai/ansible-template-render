@@ -17,11 +17,9 @@ func RunAnsible(playbookPath, outputDir string, inventoryPath string) error {
 	}
 
 	// Define command arguments
-	templatePrefix := fmt.Sprintf("template_dest_prefix=%s", outputDir)
 	args := []string{
 		playbookPath,
 		"--tags", "render_config",
-		"-e", templatePrefix,
 		"-i", inventoryPath,
 	}
 
@@ -33,12 +31,9 @@ func RunAnsible(playbookPath, outputDir string, inventoryPath string) error {
 	cmd.Stderr = os.Stderr
 
 	// Build the command string for logging
-	// Escape the template_dest_prefix value for proper logging
-	loggedTemplatePrefix := fmt.Sprintf("\"template_dest_prefix=%s\"", outputDir)
 	logArgs := []string{
 		playbookPath,
 		"--tags", "render_config",
-		"-e", loggedTemplatePrefix,
 		"-i", inventoryPath,
 	}
 	cmdString := "ansible-playbook " + strings.Join(logArgs, " ")

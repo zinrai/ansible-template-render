@@ -88,7 +88,6 @@ func IsTemplateTask(task map[string]interface{}) bool {
 }
 
 // Modifies a template task by:
-// - Adding template_dest_prefix to destination path
 // - Adding render_config tag
 // - Setting delegate_to: localhost and run_once: true
 // - Removing notify handlers (not needed for rendering)
