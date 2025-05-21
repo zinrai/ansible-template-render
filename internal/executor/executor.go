@@ -10,7 +10,7 @@ import (
 )
 
 // Runs an Ansible playbook
-func RunAnsible(playbookPath, outputDir string) error {
+func RunAnsible(playbookPath, outputDir string, inventoryPath string) error {
 	// Ensure the output directory exists
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("creating output directory: %w", err)
@@ -22,6 +22,7 @@ func RunAnsible(playbookPath, outputDir string) error {
 		playbookPath,
 		"--tags", "render_config",
 		"-e", templatePrefix,
+		"-i", inventoryPath,
 	}
 
 	// Build the command
@@ -38,6 +39,7 @@ func RunAnsible(playbookPath, outputDir string) error {
 		playbookPath,
 		"--tags", "render_config",
 		"-e", loggedTemplatePrefix,
+		"-i", inventoryPath,
 	}
 	cmdString := "ansible-playbook " + strings.Join(logArgs, " ")
 

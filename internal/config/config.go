@@ -9,7 +9,8 @@ import (
 
 // Represents the configuration for a single playbook
 type PlaybookConfig struct {
-	Name string `yaml:"name"`
+	Name      string `yaml:"name"`
+	Inventory string `yaml:"inventory"`
 }
 
 // Represents runtime options for the tool
@@ -45,6 +46,10 @@ func LoadConfig(path string) (*Config, error) {
 	for i, playbook := range config.Playbooks {
 		if playbook.Name == "" {
 			return nil, fmt.Errorf("playbook #%d missing name", i+1)
+		}
+
+		if playbook.Inventory == "" {
+			return nil, fmt.Errorf("playbook '%s' missing inventory", playbook.Name)
 		}
 	}
 

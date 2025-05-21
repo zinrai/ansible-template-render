@@ -39,6 +39,13 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 	}
 	logger.Info("Found playbook", "path", playbookPath)
 
+	// Find the inventory file
+	inventoryPath, err := finder.FindInventory(playbookConfig.Inventory)
+	if err != nil {
+		return utils.NewFileNotFoundError(playbookConfig.Inventory, err)
+	}
+	logger.Info("Found inventory", "path", inventoryPath)
+
 	// Create and setup the environment
 	env, err := setupAndValidateEnvironment(playbookConfig.Name, cfg.Options)
 	if err != nil {
@@ -47,6 +54,14 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 
 	// Always restore original directory when done
 	defer restoreOriginalDirectory(env)
+
+	// Copy inventory file to temp directory
+	tempInventoryPath, err := copier.CopyInventory(inventoryPath, env.TempDir)
+	if err != nil {
+		return utils.NewError(utils.ErrUnknown, "copying inventory", err)
+	}
+	env.InventoryPath = tempInventoryPath
+	logger.Info("Copied inventory file", "path", tempInventoryPath)
 
 	// Process the playbook and roles
 	hasTemplates, err := processPlaybookContent(playbookPath, env, playbookConfig.Name)
@@ -104,6 +119,7 @@ type Environment struct {
 	TempDir           string
 	PlaybookPath      string
 	TempPlaybookPath  string
+	InventoryPath     string
 	AnsibleConfigPath string
 	OriginalDir       string
 }
@@ -254,11 +270,12 @@ func printGenerateOnlyInstructions(env *Environment) {
 
 	logger.Info("Generated Ansible files in generate-only mode",
 		"playbook", tempPlaybookBasename,
+		"inventory", env.InventoryPath,
 		"dir", env.TempDir)
 
 	logger.Info("To execute manually:",
-		"command", fmt.Sprintf("cd %s && ANSIBLE_CONFIG=%s ansible-playbook %s --tags render_config",
-			env.TempDir, absAnsibleCfgPath, tempPlaybookBasename))
+		"command", fmt.Sprintf("cd %s && ANSIBLE_CONFIG=%s ansible-playbook %s --tags render_config -i %s",
+			env.TempDir, absAnsibleCfgPath, tempPlaybookBasename, env.InventoryPath))
 }
 
 // Executes Ansible in the temporary environment
@@ -275,18 +292,21 @@ func executeAnsible(env *Environment) error {
 	}
 	os.Setenv("ANSIBLE_CONFIG", absAnsibleCfgPath)
 
-	// Execute Ansible - removed template_dest_prefix parameter
+	// Execute Ansible with inventory
 	tempPlaybookBasename := filepath.Base(env.TempPlaybookPath)
 	args := []string{
 		tempPlaybookBasename,
 		"--tags", "render_config",
+		"-i", env.InventoryPath,
 	}
 
 	cmd := exec.Command("ansible-playbook", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	cmdString := "ansible-playbook " + tempPlaybookBasename + " --tags render_config"
+	// Command string for logging
+	cmdString := fmt.Sprintf("ansible-playbook %s --tags render_config -i %s",
+		tempPlaybookBasename, env.InventoryPath)
 	logger.Info("Executing Ansible command", "command", cmdString)
 
 	return cmd.Run()
