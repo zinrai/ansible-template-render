@@ -46,6 +46,9 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 	}
 	logger.Info("Found inventory", "path", inventoryPath)
 
+	// Find vars directories (group_vars and host_vars)
+	varsDirectories := finder.FindVarsDirectories(playbookPath, inventoryPath)
+
 	// Create and setup the environment
 	env, err := setupAndValidateEnvironment(playbookConfig.Name, cfg.Options)
 	if err != nil {
@@ -62,6 +65,12 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 	}
 	env.InventoryPath = tempInventoryPath
 	logger.Info("Copied inventory file", "path", tempInventoryPath)
+
+	// Copy vars directories to temp directory
+	err = copier.CopyVarsDirectories(varsDirectories, env.TempDir)
+	if err != nil {
+		return utils.NewError(utils.ErrUnknown, "copying vars directories", err)
+	}
 
 	// Process the playbook and roles
 	hasTemplates, err := processPlaybookContent(playbookPath, env, playbookConfig.Name)
