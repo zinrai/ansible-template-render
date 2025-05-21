@@ -32,7 +32,7 @@ func NewDirectoryTask(destPath string, playbookName string) *DirectoryTask {
 // Converts the directory task to a map representation
 func (d *DirectoryTask) ToMap() map[string]interface{} {
 	// Create the full output path
-	outputPath := filepath.Join(fmt.Sprintf("tmp-%s/output", d.PlaybookName), d.DestPath)
+	outputPath := filepath.Join("output", d.DestPath)
 	dirPath := filepath.Dir(outputPath)
 
 	return map[string]interface{}{
@@ -118,7 +118,7 @@ func createDirectoryTaskIfNeeded(templateTask *ansible.TemplateTask, processedDi
 	}
 
 	// Create the full output path
-	outputPath := filepath.Join(fmt.Sprintf("tmp-%s/output", playbookName), destPath)
+	outputPath := filepath.Join("output", destPath)
 	dirPath := filepath.Dir(outputPath)
 
 	if processedDirs[dirPath] {

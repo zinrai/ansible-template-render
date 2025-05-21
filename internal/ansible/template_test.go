@@ -176,7 +176,7 @@ func TestTemplateTask_Modify(t *testing.T) {
 
 	// Verify destination path has the prefix
 	module := fullTask["template"].(map[string]interface{})
-	expectedDest := "tmp-test-playbook/output/etc/app/config.conf"
+	expectedDest := "output/etc/app/config.conf"
 	if module["dest"] != expectedDest {
 		t.Errorf("Destination not modified correctly: got %v, want %v", module["dest"], expectedDest)
 	}
@@ -236,8 +236,9 @@ func TestModifyTemplateTask(t *testing.T) {
 
 	// Verify task was modified
 	module := templateTask["template"].(map[string]interface{})
-	if !strings.Contains(module["dest"].(string), "tmp-test-playbook/output") {
-		t.Errorf("ModifyTemplateTask() did not modify the destination path")
+	destPath := module["dest"].(string)
+	if !strings.HasPrefix(destPath, "output/") {
+		t.Errorf("ModifyTemplateTask() did not modify the destination path correctly: %s", destPath)
 	}
 
 	if _, hasNotify := templateTask["notify"]; hasNotify {

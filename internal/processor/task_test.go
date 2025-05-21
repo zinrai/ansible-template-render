@@ -137,7 +137,7 @@ func TestProcessTemplateTasks(t *testing.T) {
 						// Check if template dest includes the correct path
 						templateTask, _ := ansible.NewTemplateTask(task)
 						destPath := templateTask.GetDestPath()
-						if !strings.Contains(destPath, "tmp-test-playbook/output") {
+						if !strings.HasPrefix(destPath, "output/") {
 							t.Errorf("Template task not modified correctly: %v", destPath)
 						}
 
@@ -180,7 +180,7 @@ func TestHandleTemplateTask(t *testing.T) {
 					"dest": "/etc/app/app.conf",
 				},
 			},
-			existingDirs:     map[string]bool{"tmp-test-playbook/output/etc/app": true},
+			existingDirs:     map[string]bool{"output/etc/app": true},
 			expectedTasksLen: 1, // Only template task
 			expectedDirAdded: false,
 		},
@@ -251,7 +251,7 @@ func TestCreateDirectoryTaskIfNeeded(t *testing.T) {
 		{
 			name:         "existing directory",
 			destPath:     "/etc/app/config.conf",
-			existingDirs: map[string]bool{"tmp-test-playbook/output/etc/app": true},
+			existingDirs: map[string]bool{"output/etc/app": true},
 			expectTask:   false,
 		},
 		{
@@ -290,7 +290,7 @@ func TestCreateDirectoryTaskIfNeeded(t *testing.T) {
 
 			// If a task was created, check that the directory was marked as processed
 			if tt.expectTask {
-				outputPath := filepath.Join("tmp-test-playbook/output", tt.destPath)
+				outputPath := filepath.Join("output", tt.destPath)
 				dirPath := filepath.Dir(outputPath)
 				if !processedDirs[dirPath] {
 					t.Errorf("Directory %s not marked as processed", dirPath)
@@ -339,7 +339,7 @@ func TestCopyAndModifyTemplateTask(t *testing.T) {
 			// Check if template dest includes correct path
 			templateTask, _ := ansible.NewTemplateTask(modifiedTask)
 			destPath := templateTask.GetDestPath()
-			if !strings.Contains(destPath, "tmp-test-playbook/output") {
+			if !strings.HasPrefix(destPath, "output/") {
 				t.Errorf("Template task not modified correctly: %v", destPath)
 			}
 
@@ -377,8 +377,8 @@ func TestDirectoryTask_ToMap(t *testing.T) {
 			name:            "simple path",
 			destPath:        "/etc/app.conf",
 			playbookName:    "test-playbook",
-			expectedPath:    "tmp-test-playbook/output/etc",
-			expectedName:    "Ensure directory exists for tmp-test-playbook/output/etc/app.conf",
+			expectedPath:    "output/etc",
+			expectedName:    "Ensure directory exists for output/etc/app.conf",
 			expectedState:   "directory",
 			expectedTags:    []interface{}{"render_config"},
 			expectedRunOnce: true,
@@ -387,8 +387,8 @@ func TestDirectoryTask_ToMap(t *testing.T) {
 			name:            "nested path",
 			destPath:        "/var/lib/app/data/config.dat",
 			playbookName:    "test-playbook",
-			expectedPath:    "tmp-test-playbook/output/var/lib/app/data",
-			expectedName:    "Ensure directory exists for tmp-test-playbook/output/var/lib/app/data/config.dat",
+			expectedPath:    "output/var/lib/app/data",
+			expectedName:    "Ensure directory exists for output/var/lib/app/data/config.dat",
 			expectedState:   "directory",
 			expectedTags:    []interface{}{"render_config"},
 			expectedRunOnce: true,

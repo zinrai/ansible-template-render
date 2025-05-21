@@ -1,7 +1,6 @@
 package ansible
 
 import (
-	"fmt"
 	"path/filepath"
 )
 
@@ -43,7 +42,7 @@ func (t *TemplateTask) Modify(playbookName string) {
 	}
 
 	// Use fixed output path based on playbook name
-	t.ModuleData["dest"] = filepath.Join(fmt.Sprintf("tmp-%s/output", playbookName), destPath)
+	t.ModuleData["dest"] = filepath.Join("output", destPath)
 	t.Task[t.ModuleKey] = t.ModuleData
 
 	// Add render_config tag
