@@ -17,69 +17,50 @@ import (
 
 // Runs the template generation process based on the configuration
 func RunTemplateGeneration(cfg *config.Config, generateOnly bool) error {
-	// Process each playbook
 	for _, playbookConfig := range cfg.Playbooks {
 		logger.Info("Processing playbook", "name", playbookConfig.Name)
-
 		err := processPlaybook(playbookConfig, cfg, generateOnly)
 		if err != nil {
 			return utils.NewError(utils.ErrUnknown, fmt.Sprintf("processing playbook %s", playbookConfig.Name), err)
 		}
 	}
-
 	return nil
 }
 
-// Processes a single playbook
 func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config, generateOnly bool) error {
-	// Find the playbook file
 	playbookPath, err := finder.FindPlaybook(playbookConfig.Name)
 	if err != nil {
 		return utils.NewFileNotFoundError(playbookConfig.Name, err)
 	}
 	logger.Info("Found playbook", "path", playbookPath)
 
-	// Find the inventory file
 	inventoryPath, err := finder.FindInventory(playbookConfig.Inventory)
 	if err != nil {
 		return utils.NewFileNotFoundError(playbookConfig.Inventory, err)
 	}
 	logger.Info("Found inventory", "path", inventoryPath)
 
-	// Find vars directories (group_vars and host_vars)
 	varsDirectories := finder.FindVarsDirectories(playbookPath, inventoryPath)
 
-	// Create and setup the environment
 	env, err := setupAndValidateEnvironment(playbookConfig.Name)
 	if err != nil {
 		return err
 	}
-
-	// Always restore original directory when done
 	defer restoreOriginalDirectory(env)
 
-	// Copy inventory file to temp directory
-	tempInventoryPath, err := copier.CopyInventory(inventoryPath, env.TempDir)
+	// Convert inventory for local execution using ansible-inventory
+	tempInventoryPath, err := processor.ModifyInventoryForLocalExecution(inventoryPath, env.TempDir)
 	if err != nil {
-		return utils.NewError(utils.ErrUnknown, "copying inventory", err)
+		return utils.NewError(utils.ErrUnknown, "converting inventory for local execution", err)
 	}
 	env.InventoryPath = tempInventoryPath
-	logger.Info("Copied inventory file", "path", tempInventoryPath)
+	logger.Info("Converted inventory for local execution", "path", tempInventoryPath)
 
-	// Modify inventory to use local connection for all hosts
-	err = processor.ModifyInventoryForLocalExecution(tempInventoryPath)
-	if err != nil {
-		return utils.NewError(utils.ErrUnknown, "modifying inventory for local execution", err)
-	}
-	logger.Info("Modified inventory for local execution", "path", tempInventoryPath)
-
-	// Copy vars directories to temp directory
 	err = copier.CopyVarsDirectories(varsDirectories, env.TempDir)
 	if err != nil {
 		return utils.NewError(utils.ErrUnknown, "copying vars directories", err)
 	}
 
-	// Process the playbook and roles
 	hasTemplates, err := processPlaybookContent(playbookPath, env, playbookConfig.Name)
 	if err != nil {
 		return err
@@ -90,38 +71,31 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config, g
 		return nil
 	}
 
-	// Execute or generate instructions
 	return executeOrGenerateInstructions(cfg, env, generateOnly)
 }
 
-// Setup and validate the environment
 func setupAndValidateEnvironment(playbookName string) (*Environment, error) {
 	env, err := setupEnvironment(playbookName)
 	if err != nil {
 		return nil, utils.NewError(utils.ErrEnvironmentSetup, "setting up environment", err)
 	}
-
 	return env, nil
 }
 
-// Restore the original directory
 func restoreOriginalDirectory(env *Environment) {
 	if err := os.Chdir(env.OriginalDir); err != nil {
 		logger.Warn("Failed to change back to original directory", "error", err)
 	}
 }
 
-// Execute or generate instructions
 func executeOrGenerateInstructions(cfg *config.Config, env *Environment, generateOnly bool) error {
 	outputDir := filepath.Join(env.TempDir, "output")
 
-	// Generate-only mode: display instructions and exit
 	if generateOnly {
 		printGenerateOnlyInstructions(env, cfg.Options.AnsibleArgs)
 		return nil
 	}
 
-	// Execute Ansible
 	if err := executeAnsible(env, cfg.Options.AnsibleArgs); err != nil {
 		return err
 	}
@@ -130,7 +104,6 @@ func executeOrGenerateInstructions(cfg *config.Config, env *Environment, generat
 	return nil
 }
 
-// Holds the processing environment details
 type Environment struct {
 	TempDir           string
 	PlaybookPath      string
@@ -140,28 +113,22 @@ type Environment struct {
 	OriginalDir       string
 }
 
-// Creates and prepares the processing environment
 func setupEnvironment(playbookName string) (*Environment, error) {
-	// Create a temporary directory
 	tempDir := fmt.Sprintf("tmp-%s", playbookName)
 
-	// Remove existing directory if it exists
 	if err := os.RemoveAll(tempDir); err != nil {
 		return nil, utils.NewError(utils.ErrUnknown, "cleaning existing directory", err)
 	}
 
-	// Create the directory
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return nil, utils.NewError(utils.ErrUnknown, "creating temp directory", err)
 	}
 
-	// Create the subdirectories
 	err := createRequiredDirectories(tempDir)
 	if err != nil {
 		return nil, err
 	}
 
-	// Save the current directory
 	currentDir, err := os.Getwd()
 	if err != nil {
 		return nil, utils.NewError(utils.ErrUnknown, "getting current directory", err)
@@ -173,15 +140,12 @@ func setupEnvironment(playbookName string) (*Environment, error) {
 	}, nil
 }
 
-// Create required directories
 func createRequiredDirectories(tempDir string) error {
-	// Create the roles directory
 	rolesDir := filepath.Join(tempDir, "roles")
 	if err := os.MkdirAll(rolesDir, 0755); err != nil {
 		return utils.NewError(utils.ErrUnknown, "creating roles directory", err)
 	}
 
-	// Create the output directory
 	outputDir := filepath.Join(tempDir, "output")
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return utils.NewError(utils.ErrUnknown, "creating output directory", err)
@@ -190,15 +154,12 @@ func createRequiredDirectories(tempDir string) error {
 	return nil
 }
 
-// Processes the content of a playbook
 func processPlaybookContent(playbookPath string, env *Environment, playbookName string) (bool, error) {
-	// Load the playbook
 	playbook, err := ansible.LoadPlaybook(playbookPath)
 	if err != nil {
 		return false, utils.NewError(utils.ErrUnknown, "loading playbook", err)
 	}
 
-	// 1. Copy the playbook to temp directory
 	playbookCopier := &copier.PlaybookCopier{}
 	tempPlaybookPath, err := playbookCopier.CopyPlaybook(playbookPath, env.TempDir)
 	if err != nil {
@@ -207,12 +168,10 @@ func processPlaybookContent(playbookPath string, env *Environment, playbookName 
 	env.PlaybookPath = playbookPath
 	env.TempPlaybookPath = tempPlaybookPath
 
-	// 2. Create Ansible configuration
 	if err := createAnsibleConfig(env); err != nil {
 		return false, err
 	}
 
-	// 3. Extract roles from the playbook and resolve dependencies
 	directRoles := ansible.ExtractRolesFromPlaybook(playbook)
 	logger.Info("Found direct roles", "roles", directRoles)
 
@@ -222,16 +181,13 @@ func processPlaybookContent(playbookPath string, env *Environment, playbookName 
 		return false, err
 	}
 
-	// 4. Remove duplicates
 	uniqueRoles := removeDuplicates(allRoles)
 	logger.Info("All roles (including dependencies)", "roles", uniqueRoles)
 
-	// 5. Copy all roles to temp directory
 	if err := copier.CopyAllRoles(uniqueRoles, env.TempDir); err != nil {
 		return false, utils.NewError(utils.ErrUnknown, "copying roles", err)
 	}
 
-	// 6. Process tasks in each role
 	hasTemplates, err := processor.ProcessAllRoles(uniqueRoles, env.TempDir, playbookName)
 	if err != nil {
 		return false, utils.NewError(utils.ErrUnknown, "processing role tasks", err)
@@ -240,7 +196,6 @@ func processPlaybookContent(playbookPath string, env *Environment, playbookName 
 	return hasTemplates, nil
 }
 
-// Gather all roles including dependencies
 func gatherAllRoles(directRoles []string, resolvedRoles map[string]bool) ([]string, error) {
 	var allRoles []string
 
@@ -256,7 +211,6 @@ func gatherAllRoles(directRoles []string, resolvedRoles map[string]bool) ([]stri
 	return allRoles, nil
 }
 
-// Creates the Ansible configuration file
 func createAnsibleConfig(env *Environment) error {
 	ansibleCfgPath := filepath.Join(env.TempDir, "ansible.cfg")
 
@@ -270,11 +224,9 @@ local_tmp = ansible-tmp
 	}
 
 	env.AnsibleConfigPath = ansibleCfgPath
-
 	return nil
 }
 
-// Prints instructions for generate-only mode
 func printGenerateOnlyInstructions(env *Environment, ansibleArgs string) {
 	tempPlaybookBasename := filepath.Base(env.TempPlaybookPath)
 	absAnsibleCfgPath, _ := filepath.Abs(env.AnsibleConfigPath)
@@ -293,9 +245,7 @@ func printGenerateOnlyInstructions(env *Environment, ansibleArgs string) {
 	logger.Info("To execute manually:", "command", cmd)
 }
 
-// Executes Ansible in the temporary environment
 func executeAnsible(env *Environment, ansibleArgs string) error {
-	// Prepare Ansible execution environment
 	execEnv := executor.ExecutionEnvironment{
 		WorkingDir:        env.TempDir,
 		PlaybookPath:      filepath.Base(env.TempPlaybookPath),
@@ -304,11 +254,9 @@ func executeAnsible(env *Environment, ansibleArgs string) error {
 		AnsibleArgs:       ansibleArgs,
 	}
 
-	// Call the executor package function
 	return executor.RunAnsible(execEnv)
 }
 
-// Removes duplicate strings from a slice
 func removeDuplicates(elements []string) []string {
 	encountered := map[string]bool{}
 	result := []string{}

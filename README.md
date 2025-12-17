@@ -12,6 +12,7 @@ A tool for rendering Ansible template files locally without applying changes to 
 - Process playbooks with dependencies
 - Respect variable precedence in Ansible
 - Render templates with the same variable context that would be used in actual deployment
+- Support both static and dynamic inventory
 - Option to generate files without executing Ansible
 
 ## Prerequisites
