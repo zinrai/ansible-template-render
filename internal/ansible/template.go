@@ -54,6 +54,11 @@ func (t *TemplateTask) Modify(playbookName string) {
 
 	// Remove notify field - not needed for configuration rendering
 	delete(t.Task, "notify")
+
+	// Remove file attributes - not applicable for local rendering
+	delete(t.ModuleData, "owner")
+	delete(t.ModuleData, "group")
+	delete(t.ModuleData, "mode")
 }
 
 // Ensures the render_config tag is present
