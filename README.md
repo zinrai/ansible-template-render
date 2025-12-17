@@ -14,6 +14,10 @@ A tool for rendering Ansible template files locally without applying changes to 
 - Render templates with the same variable context that would be used in actual deployment
 - Option to generate files without executing Ansible
 
+## Prerequisites
+
+[Ansible](https://github.com/ansible/ansible)
+
 ## Installation
 
 ```bash
@@ -79,22 +83,22 @@ options:
 
 ## Examples
 
-Basic usage:
+An example project is available in the `example/` directory:
 
 ```bash
-$ ansible-template-render -config config.yml
+$ ansible-template-render -config render-config.yml
 ```
 
 Generate only without executing:
 
 ```bash
-$ ansible-template-render -config config.yml -generate-only
+$ ansible-template-render -config render-config.yml -generate-only
 ```
 
 Verbose logging:
 
 ```bash
-$ ansible-template-render -config config.yml -log-level debug
+$ ansible-template-render -config render-config.yml -log-level debug
 ```
 
 ## License
