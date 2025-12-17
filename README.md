@@ -34,9 +34,6 @@ Create a config file (e.g., `config.yml`):
 playbooks:
   - name: myplaybook
     inventory: inventory
-options:
-  generate_only: false
-  log_level: info
 ```
 
 Then run:
@@ -77,8 +74,7 @@ playbooks:
   - name: playbook2
     inventory: other_hosts
 options:
-  generate_only: false  # Set to true to generate files without executing
-  log_level: info       # debug, info, warn, or error
+  ansible_args: "-v --diff"  # Additional arguments for ansible-playbook
 ```
 
 ## Examples

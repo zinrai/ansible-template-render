@@ -16,12 +16,12 @@ import (
 )
 
 // Runs the template generation process based on the configuration
-func RunTemplateGeneration(cfg *config.Config) error {
+func RunTemplateGeneration(cfg *config.Config, generateOnly bool) error {
 	// Process each playbook
 	for _, playbookConfig := range cfg.Playbooks {
 		logger.Info("Processing playbook", "name", playbookConfig.Name)
 
-		err := processPlaybook(playbookConfig, cfg)
+		err := processPlaybook(playbookConfig, cfg, generateOnly)
 		if err != nil {
 			return utils.NewError(utils.ErrUnknown, fmt.Sprintf("processing playbook %s", playbookConfig.Name), err)
 		}
@@ -31,7 +31,7 @@ func RunTemplateGeneration(cfg *config.Config) error {
 }
 
 // Processes a single playbook
-func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) error {
+func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config, generateOnly bool) error {
 	// Find the playbook file
 	playbookPath, err := finder.FindPlaybook(playbookConfig.Name)
 	if err != nil {
@@ -50,7 +50,7 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 	varsDirectories := finder.FindVarsDirectories(playbookPath, inventoryPath)
 
 	// Create and setup the environment
-	env, err := setupAndValidateEnvironment(playbookConfig.Name, cfg.Options)
+	env, err := setupAndValidateEnvironment(playbookConfig.Name)
 	if err != nil {
 		return err
 	}
@@ -91,12 +91,12 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config) e
 	}
 
 	// Execute or generate instructions
-	return executeOrGenerateInstructions(playbookConfig, cfg, env, hasTemplates)
+	return executeOrGenerateInstructions(cfg, env, generateOnly)
 }
 
 // Setup and validate the environment
-func setupAndValidateEnvironment(playbookName string, opts config.Options) (*Environment, error) {
-	env, err := setupEnvironment(playbookName, opts)
+func setupAndValidateEnvironment(playbookName string) (*Environment, error) {
+	env, err := setupEnvironment(playbookName)
 	if err != nil {
 		return nil, utils.NewError(utils.ErrEnvironmentSetup, "setting up environment", err)
 	}
@@ -112,17 +112,17 @@ func restoreOriginalDirectory(env *Environment) {
 }
 
 // Execute or generate instructions
-func executeOrGenerateInstructions(playbookConfig config.PlaybookConfig, cfg *config.Config, env *Environment, hasTemplates bool) error {
+func executeOrGenerateInstructions(cfg *config.Config, env *Environment, generateOnly bool) error {
 	outputDir := filepath.Join(env.TempDir, "output")
 
 	// Generate-only mode: display instructions and exit
-	if cfg.Options.GenerateOnly {
-		printGenerateOnlyInstructions(env)
+	if generateOnly {
+		printGenerateOnlyInstructions(env, cfg.Options.AnsibleArgs)
 		return nil
 	}
 
 	// Execute Ansible
-	if err := executeAnsible(env); err != nil {
+	if err := executeAnsible(env, cfg.Options.AnsibleArgs); err != nil {
 		return err
 	}
 
@@ -141,7 +141,7 @@ type Environment struct {
 }
 
 // Creates and prepares the processing environment
-func setupEnvironment(playbookName string, opts config.Options) (*Environment, error) {
+func setupEnvironment(playbookName string) (*Environment, error) {
 	// Create a temporary directory
 	tempDir := fmt.Sprintf("tmp-%s", playbookName)
 
@@ -260,10 +260,10 @@ func gatherAllRoles(directRoles []string, resolvedRoles map[string]bool) ([]stri
 func createAnsibleConfig(env *Environment) error {
 	ansibleCfgPath := filepath.Join(env.TempDir, "ansible.cfg")
 
-	ansibleCfgContent := fmt.Sprintf(`[defaults]
+	ansibleCfgContent := `[defaults]
 retry_files_enabled = False
 local_tmp = ansible-tmp
-`)
+`
 
 	if err := os.WriteFile(ansibleCfgPath, []byte(ansibleCfgContent), 0644); err != nil {
 		return utils.NewError(utils.ErrUnknown, "writing ansible.cfg file", err)
@@ -275,7 +275,7 @@ local_tmp = ansible-tmp
 }
 
 // Prints instructions for generate-only mode
-func printGenerateOnlyInstructions(env *Environment) {
+func printGenerateOnlyInstructions(env *Environment, ansibleArgs string) {
 	tempPlaybookBasename := filepath.Base(env.TempPlaybookPath)
 	absAnsibleCfgPath, _ := filepath.Abs(env.AnsibleConfigPath)
 	inventoryBasename := filepath.Base(env.InventoryPath)
@@ -285,19 +285,23 @@ func printGenerateOnlyInstructions(env *Environment) {
 		"inventory", inventoryBasename,
 		"dir", env.TempDir)
 
-	logger.Info("To execute manually:",
-		"command", fmt.Sprintf("cd %s && ANSIBLE_CONFIG=%s ansible-playbook %s --tags render_config -i %s",
-			env.TempDir, absAnsibleCfgPath, tempPlaybookBasename, inventoryBasename))
+	cmd := fmt.Sprintf("cd %s && ANSIBLE_CONFIG=%s ansible-playbook %s --tags render_config -i %s",
+		env.TempDir, absAnsibleCfgPath, tempPlaybookBasename, inventoryBasename)
+	if ansibleArgs != "" {
+		cmd += fmt.Sprintf(" %s", ansibleArgs)
+	}
+	logger.Info("To execute manually:", "command", cmd)
 }
 
 // Executes Ansible in the temporary environment
-func executeAnsible(env *Environment) error {
+func executeAnsible(env *Environment, ansibleArgs string) error {
 	// Prepare Ansible execution environment
 	execEnv := executor.ExecutionEnvironment{
 		WorkingDir:        env.TempDir,
 		PlaybookPath:      filepath.Base(env.TempPlaybookPath),
 		InventoryPath:     filepath.Base(env.InventoryPath),
 		AnsibleConfigPath: env.AnsibleConfigPath,
+		AnsibleArgs:       ansibleArgs,
 	}
 
 	// Call the executor package function

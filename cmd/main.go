@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	version = "dev"
+	version = "0.2.0"
 )
 
 func main() {
@@ -43,17 +43,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Override options if specified
-	cfg.Options.GenerateOnly = *generateOnly || cfg.Options.GenerateOnly
-
 	// Run template generation
-	err = generator.RunTemplateGeneration(cfg)
+	err = generator.RunTemplateGeneration(cfg, *generateOnly)
 	if err != nil {
 		logger.Error("Error occurred", "error", err)
 		os.Exit(1)
 	}
 
-	if cfg.Options.GenerateOnly {
+	if *generateOnly {
 		logger.Info("Modified Ansible files generated successfully.")
 	} else {
 		logger.Info("Successfully generated template files")

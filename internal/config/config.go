@@ -15,8 +15,7 @@ type PlaybookConfig struct {
 
 // Represents runtime options for the tool
 type Options struct {
-	GenerateOnly bool   `yaml:"generate_only,omitempty"`
-	LogLevel     string `yaml:"log_level,omitempty"`
+	AnsibleArgs string `yaml:"ansible_args,omitempty"`
 }
 
 // Represents the complete configuration for the tool

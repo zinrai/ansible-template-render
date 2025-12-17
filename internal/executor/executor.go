@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/zinrai/ansible-template-render/internal/logger"
 )
@@ -14,6 +15,7 @@ type ExecutionEnvironment struct {
 	PlaybookPath      string // Path to the playbook (relative path)
 	InventoryPath     string // Path to the inventory (relative path)
 	AnsibleConfigPath string // Path to the ansible.cfg file (absolute path recommended)
+	AnsibleArgs       string // Additional arguments for ansible-playbook
 }
 
 // Executes an Ansible playbook
@@ -46,6 +48,12 @@ func RunAnsible(env ExecutionEnvironment) error {
 		args = append(args, "-i", env.InventoryPath)
 	}
 
+	// Add additional ansible arguments if specified
+	if env.AnsibleArgs != "" {
+		extraArgs := parseAnsibleArgs(env.AnsibleArgs)
+		args = append(args, extraArgs...)
+	}
+
 	// Create command
 	cmd := exec.Command("ansible-playbook", args...)
 	cmd.Stdout = os.Stdout
@@ -56,7 +64,19 @@ func RunAnsible(env ExecutionEnvironment) error {
 	if env.InventoryPath != "" {
 		cmdString += fmt.Sprintf(" -i %s", env.InventoryPath)
 	}
+	if env.AnsibleArgs != "" {
+		cmdString += fmt.Sprintf(" %s", env.AnsibleArgs)
+	}
 	logger.Info("Executing Ansible command", "command", cmdString)
 
 	return cmd.Run()
+}
+
+// Parses ansible arguments string into a slice of arguments
+func parseAnsibleArgs(argsStr string) []string {
+	argsStr = strings.TrimSpace(argsStr)
+	if argsStr == "" {
+		return nil
+	}
+	return strings.Fields(argsStr)
 }
