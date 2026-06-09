@@ -3,30 +3,18 @@ package finder
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
-// Finds a playbook file with the specified name
-func FindPlaybook(name string) (string, error) {
-	// Define possible file patterns
-	patterns := []string{
-		filepath.Join(".", fmt.Sprintf("%s.yml", name)),
-		filepath.Join(".", fmt.Sprintf("%s.yaml", name)),
+// Verifies a playbook file at the specified path
+func FindPlaybook(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("playbook not found: %s", path)
 	}
 
-	// Try each pattern
-	for _, pattern := range patterns {
-		info, err := os.Stat(pattern)
-		if err != nil {
-			continue
-		}
-
-		if info.IsDir() {
-			continue
-		}
-
-		return pattern, nil
+	if info.IsDir() {
+		return "", fmt.Errorf("playbook path is a directory, not a file: %s", path)
 	}
 
-	return "", fmt.Errorf("playbook not found: %s", name)
+	return path, nil
 }

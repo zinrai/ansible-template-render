@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/zinrai/ansible-template-render/internal/ansible"
-	"github.com/zinrai/ansible-template-render/internal/config"
 	"github.com/zinrai/ansible-template-render/internal/copier"
 	"github.com/zinrai/ansible-template-render/internal/executor"
 	"github.com/zinrai/ansible-template-render/internal/finder"
@@ -15,41 +15,40 @@ import (
 	"github.com/zinrai/ansible-template-render/internal/utils"
 )
 
-// Runs the template generation process based on the configuration
-func RunTemplateGeneration(cfg *config.Config, generateOnly bool) error {
-	for _, playbookConfig := range cfg.Playbooks {
-		logger.Info("Processing playbook", "name", playbookConfig.Name)
-		err := processPlaybook(playbookConfig, cfg, generateOnly)
-		if err != nil {
-			return utils.NewError(utils.ErrUnknown, fmt.Sprintf("processing playbook %s", playbookConfig.Name), err)
-		}
+// Runs the template generation process for a single playbook
+func RunTemplateGeneration(playbookPath, inventoryPath, ansibleArgs string, generateOnly bool) error {
+	playbookName := strings.TrimSuffix(filepath.Base(playbookPath), filepath.Ext(playbookPath))
+	logger.Info("Processing playbook", "name", playbookName)
+
+	if err := processPlaybook(playbookPath, inventoryPath, ansibleArgs, playbookName, generateOnly); err != nil {
+		return utils.NewError(utils.ErrUnknown, fmt.Sprintf("processing playbook %s", playbookName), err)
 	}
 	return nil
 }
 
-func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config, generateOnly bool) error {
-	playbookPath, err := finder.FindPlaybook(playbookConfig.Name)
+func processPlaybook(playbookPath, inventoryPath, ansibleArgs, playbookName string, generateOnly bool) error {
+	foundPlaybook, err := finder.FindPlaybook(playbookPath)
 	if err != nil {
-		return utils.NewFileNotFoundError(playbookConfig.Name, err)
+		return utils.NewFileNotFoundError(playbookPath, err)
 	}
-	logger.Info("Found playbook", "path", playbookPath)
+	logger.Info("Found playbook", "path", foundPlaybook)
 
-	inventoryPath, err := finder.FindInventory(playbookConfig.Inventory)
+	foundInventory, err := finder.FindInventory(inventoryPath)
 	if err != nil {
-		return utils.NewFileNotFoundError(playbookConfig.Inventory, err)
+		return utils.NewFileNotFoundError(inventoryPath, err)
 	}
-	logger.Info("Found inventory", "path", inventoryPath)
+	logger.Info("Found inventory", "path", foundInventory)
 
-	varsDirectories := finder.FindVarsDirectories(playbookPath, inventoryPath)
+	varsDirectories := finder.FindVarsDirectories(foundPlaybook, foundInventory)
 
-	env, err := setupAndValidateEnvironment(playbookConfig.Name)
+	env, err := setupAndValidateEnvironment(playbookName)
 	if err != nil {
 		return err
 	}
 	defer restoreOriginalDirectory(env)
 
 	// Convert inventory for local execution using ansible-inventory
-	tempInventoryPath, err := processor.ModifyInventoryForLocalExecution(inventoryPath, env.TempDir)
+	tempInventoryPath, err := processor.ModifyInventoryForLocalExecution(foundInventory, env.TempDir)
 	if err != nil {
 		return utils.NewError(utils.ErrUnknown, "converting inventory for local execution", err)
 	}
@@ -61,17 +60,17 @@ func processPlaybook(playbookConfig config.PlaybookConfig, cfg *config.Config, g
 		return utils.NewError(utils.ErrUnknown, "copying vars directories", err)
 	}
 
-	hasTemplates, err := processPlaybookContent(playbookPath, env, playbookConfig.Name)
+	hasTemplates, err := processPlaybookContent(foundPlaybook, env, playbookName)
 	if err != nil {
 		return err
 	}
 
 	if !hasTemplates {
-		logger.Info("No template tasks found in playbook", "name", playbookConfig.Name)
+		logger.Info("No template tasks found in playbook", "name", playbookName)
 		return nil
 	}
 
-	return executeOrGenerateInstructions(cfg, env, generateOnly)
+	return executeOrGenerateInstructions(env, ansibleArgs, generateOnly)
 }
 
 func setupAndValidateEnvironment(playbookName string) (*Environment, error) {
@@ -88,15 +87,15 @@ func restoreOriginalDirectory(env *Environment) {
 	}
 }
 
-func executeOrGenerateInstructions(cfg *config.Config, env *Environment, generateOnly bool) error {
+func executeOrGenerateInstructions(env *Environment, ansibleArgs string, generateOnly bool) error {
 	outputDir := filepath.Join(env.TempDir, "output")
 
 	if generateOnly {
-		printGenerateOnlyInstructions(env, cfg.Options.AnsibleArgs)
+		printGenerateOnlyInstructions(env, ansibleArgs)
 		return nil
 	}
 
-	if err := executeAnsible(env, cfg.Options.AnsibleArgs); err != nil {
+	if err := executeAnsible(env, ansibleArgs); err != nil {
 		return err
 	}
 

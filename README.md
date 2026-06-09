@@ -21,28 +21,15 @@ A tool for rendering Ansible template files locally without applying changes to 
 
 ## Usage
 
-Create a config file (e.g., `config.yml`):
-
-```yaml
-playbooks:
-  - name: myplaybook
-    inventory: inventory
+```
+ansible-template-render run      [-i INV] PLAYBOOK [-- ANSIBLE_ARGS...]
+ansible-template-render generate [-i INV] PLAYBOOK [-- ANSIBLE_ARGS...]
+ansible-template-render version
 ```
 
-Then run:
-
-```bash
-$ ansible-template-render -config config.yml
-```
-
-### Command-line options
-
-```
-Usage: ansible-template-render --config [config file]
-  -config string        Config file path
-  -version              Show version
-  -generate-only        Generate modified Ansible files without executing
-```
+- `run` — render templates by invoking `ansible-playbook`
+- `generate` — produce the modified Ansible files without executing
+- Arguments after `--` are passed through to `ansible-playbook`
 
 ## How It Works
 
@@ -55,32 +42,24 @@ Usage: ansible-template-render --config [config file]
 4. Ansible is executed with only the `render_config` tag enabled
 5. The resulting files are generated in the `output` directory
 
-## Configuration File
-
-The configuration file uses YAML format:
-
-```yaml
-playbooks:
-  - name: playbook1
-    inventory: hosts
-  - name: playbook2
-    inventory: other_hosts
-options:
-  ansible_args: "-v --diff"  # Additional arguments for ansible-playbook
-```
-
 ## Examples
 
 An example project is available in the `example/` directory:
 
 ```bash
-$ ansible-template-render -config render-config.yml
+$ ansible-template-render run -i inventory site.yml
 ```
 
-Generate only without executing:
+Pass extra flags to `ansible-playbook`:
 
 ```bash
-$ ansible-template-render -config render-config.yml -generate-only
+$ ansible-template-render run -i inventory site.yml -- --diff
+```
+
+Generate without executing:
+
+```bash
+$ ansible-template-render generate -i inventory site.yml
 ```
 
 ## License

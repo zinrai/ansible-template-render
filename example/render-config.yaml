@@ -1,5 +1,0 @@
-playbooks:
-  - name: site
-    inventory: inventory
-options:
-  ansible_args: "--diff"  
