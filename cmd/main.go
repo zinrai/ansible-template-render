@@ -11,7 +11,9 @@ import (
 )
 
 var (
-	version = "0.3.0"
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 func main() {
@@ -21,7 +23,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("ansible-template-render version %s\n", version)
+		fmt.Printf("ansible-template-render %s (commit %s, built %s)\n", version, commit, date)
 		os.Exit(0)
 	}
 
