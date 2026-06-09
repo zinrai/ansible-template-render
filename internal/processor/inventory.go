@@ -6,8 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/zinrai/ansible-template-render/internal/logger"
-
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,7 +37,6 @@ func ModifyInventoryForLocalExecution(inventoryPath, destDir string) (string, er
 		return "", fmt.Errorf("writing inventory file: %w", err)
 	}
 
-	logger.Debug("Converted inventory for local execution", "path", destPath)
 	return destPath, nil
 }
 

@@ -54,7 +54,6 @@ Usage: ansible-template-render --config [config file]
   -config string        Config file path
   -version              Show version
   -generate-only        Generate modified Ansible files without executing
-  -log-level string     Log level (debug, info, warn, error) (default "info")
 ```
 
 ## How It Works
@@ -94,12 +93,6 @@ Generate only without executing:
 
 ```bash
 $ ansible-template-render -config render-config.yml -generate-only
-```
-
-Verbose logging:
-
-```bash
-$ ansible-template-render -config render-config.yml -log-level debug
 ```
 
 ## License

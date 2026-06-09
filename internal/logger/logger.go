@@ -11,7 +11,6 @@ type LogLevel string
 
 // Predefined log levels
 const (
-	DebugLevel LogLevel = "debug"
 	InfoLevel  LogLevel = "info"
 	WarnLevel  LogLevel = "warn"
 	ErrorLevel LogLevel = "error"
@@ -22,8 +21,6 @@ var defaultLogger *slog.Logger
 // Convert string to log level
 func ParseLogLevel(level LogLevel) slog.Level {
 	switch level {
-	case DebugLevel:
-		return slog.LevelDebug
 	case WarnLevel:
 		return slog.LevelWarn
 	case ErrorLevel:
@@ -46,11 +43,6 @@ func Initialize(level LogLevel, output io.Writer) {
 	handler := slog.NewTextHandler(output, opts)
 	defaultLogger = slog.New(handler)
 	slog.SetDefault(defaultLogger)
-}
-
-// Logs a debug message
-func Debug(msg string, args ...any) {
-	defaultLogger.Debug(msg, args...)
 }
 
 // Logs an info message

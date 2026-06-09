@@ -34,8 +34,6 @@ func (c *RoleCopier) CopyRole(roleName string, destDir string) error {
 
 // Recursively copies the role contents
 func (c *RoleCopier) copyRoleContents(srcPath, destPath string) error {
-	logger.Debug("Walking directory", "path", srcPath)
-
 	// Check if directory exists (follow symlinks)
 	if err := c.validateSourceDirectory(srcPath); err != nil {
 		return err
@@ -46,8 +44,6 @@ func (c *RoleCopier) copyRoleContents(srcPath, destPath string) error {
 	if err != nil {
 		return fmt.Errorf("reading directory %s: %w", srcPath, err)
 	}
-
-	logger.Debug("Directory entries", "path", srcPath, "count", len(entries))
 
 	// Process directories first
 	if err := c.copyDirectories(srcPath, destPath, entries); err != nil {
@@ -133,7 +129,6 @@ func (c *RoleCopier) copyFileWithLogging(srcPath, destPath string) error {
 		return fmt.Errorf("expected file but found directory: %s", srcPath)
 	}
 
-	logger.Debug("Copying file", "src", srcPath, "dest", destPath)
 	if err := utils.CopyFile(srcPath, destPath); err != nil {
 		return fmt.Errorf("copying file: %w", err)
 	}
