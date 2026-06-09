@@ -19,18 +19,6 @@ A tool for rendering Ansible template files locally without applying changes to 
 
 [Ansible](https://github.com/ansible/ansible)
 
-## Installation
-
-```bash
-$ go install github.com/zinrai/ansible-template-render@latest
-```
-
-Or build it manually:
-
-```bash
-$ go build -o ansible-template-render cmd/main.go
-```
-
 ## Usage
 
 Create a config file (e.g., `config.yml`):
