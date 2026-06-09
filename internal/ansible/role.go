@@ -7,7 +7,7 @@ import (
 	"github.com/zinrai/ansible-template-render/internal/finder"
 	"github.com/zinrai/ansible-template-render/internal/logger"
 
-	"gopkg.in/yaml.v3"
+	"github.com/goccy/go-yaml"
 )
 
 // Represents a role dependency
