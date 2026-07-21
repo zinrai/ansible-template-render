@@ -37,10 +37,13 @@ func RunAnsible(env ExecutionEnvironment) error {
 		os.Setenv("ANSIBLE_CONFIG", env.AnsibleConfigPath)
 	}
 
-	// Build command line arguments
+	// Build command line arguments.
+	// Disable become: rendering is local, so escalation is unnecessary and would
+	// otherwise hang on a sudo password prompt.
 	args := []string{
 		env.PlaybookPath,
 		"--tags", "render_config",
+		"-e", "ansible_become=false",
 	}
 
 	// Add inventory path if specified
@@ -60,7 +63,7 @@ func RunAnsible(env ExecutionEnvironment) error {
 	cmd.Stderr = os.Stderr
 
 	// Command string for logging
-	cmdString := fmt.Sprintf("ansible-playbook %s --tags render_config", env.PlaybookPath)
+	cmdString := fmt.Sprintf("ansible-playbook %s --tags render_config -e ansible_become=false", env.PlaybookPath)
 	if env.InventoryPath != "" {
 		cmdString += fmt.Sprintf(" -i %s", env.InventoryPath)
 	}

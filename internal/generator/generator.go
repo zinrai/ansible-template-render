@@ -236,7 +236,7 @@ func printGenerateOnlyInstructions(env *Environment, ansibleArgs string) {
 		"inventory", inventoryBasename,
 		"dir", env.TempDir)
 
-	cmd := fmt.Sprintf("cd %s && ANSIBLE_CONFIG=%s ansible-playbook %s --tags render_config -i %s",
+	cmd := fmt.Sprintf("cd %s && ANSIBLE_CONFIG=%s ansible-playbook %s --tags render_config -e ansible_become=false -i %s",
 		env.TempDir, absAnsibleCfgPath, tempPlaybookBasename, inventoryBasename)
 	if ansibleArgs != "" {
 		cmd += fmt.Sprintf(" %s", ansibleArgs)
